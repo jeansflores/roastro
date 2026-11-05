@@ -9,6 +9,8 @@ import (
 	"math"
 	"math/rand"
 	"sync"
+
+	"github.com/jeansflores/project-c/internal/machine"
 )
 
 const (
@@ -20,40 +22,6 @@ const (
 	safetyLimit = 280.0   // "Limite segurança" on the HMI options screen
 	latentJkg   = 2.26e6
 )
-
-// Manual p. 16: fan % -> airflow (m³/h)
-var fanTable = [][2]float64{
-	{0, 0}, {5, 71}, {10, 76}, {15, 80}, {20, 83}, {25, 86}, {30, 90}, {35, 105},
-	{40, 113}, {45, 124}, {50, 136}, {55, 150}, {60, 161}, {65, 178}, {70, 192},
-	{75, 203}, {80, 218}, {85, 229}, {90, 240}, {95, 254}, {100, 260}, {105, 271},
-	{110, 274}, {115, 278}, {120, 282},
-}
-
-// Manual p. 16: drum % -> rpm
-var drumTable = [][2]float64{
-	{0, 0}, {5, 5}, {10, 8}, {15, 12}, {20, 15}, {25, 17}, {30, 19}, {35, 23}, {40, 26},
-	{45, 29}, {50, 33}, {55, 36}, {60, 39}, {65, 42}, {70, 46}, {75, 49}, {80, 52},
-	{85, 56}, {90, 59}, {95, 62}, {100, 65}, {105, 68}, {110, 71}, {115, 72}, {120, 73},
-}
-
-func interp(t [][2]float64, x float64) float64 {
-	if x <= t[0][0] {
-		return t[0][1]
-	}
-	for i := 1; i < len(t); i++ {
-		if x <= t[i][0] {
-			a, b := t[i-1], t[i]
-			return a[1] + (b[1]-a[1])*(x-a[0])/(b[0]-a[0])
-		}
-	}
-	return t[len(t)-1][1]
-}
-
-// AirflowM3h converts a fan setting in percent into airflow in m³/h.
-func AirflowM3h(pct float64) float64 { return interp(fanTable, pct) }
-
-// DrumRPM converts a drum setting in percent into drum rpm.
-func DrumRPM(pct float64) float64 { return interp(drumTable, pct) }
 
 // Event is something notable that happened inside the simulator, at simulated time T.
 type Event struct {
@@ -160,7 +128,7 @@ func (s *Sim) step(dt float64) {
 	// Air
 	q := 10.0 // natural draft with the fan off
 	if s.FanOn {
-		q = AirflowM3h(s.Fan)
+		q = machine.AirflowM3h(s.Fan)
 	}
 	mcp := 1.2 * q / 3600 * 1005 // W/K
 	drumF := 0.3
@@ -420,7 +388,7 @@ func (s *Sim) Snapshot() Snapshot {
 	}
 	return Snapshot{
 		SimTime: s.T, BT: r1(s.BTprobe), ET: r1(s.ETprobe), GasCmd: s.GasCmd, GasFb: r1(s.GasFb),
-		Drum: s.Drum, DrumRPM: r1(DrumRPM(s.Drum)), Fan: s.Fan, AirflowM3h: r1(AirflowM3h(s.Fan)),
+		Drum: s.Drum, DrumRPM: r1(machine.DrumRPM(s.Drum)), Fan: s.Fan, AirflowM3h: r1(machine.AirflowM3h(s.Fan)),
 		Burner: s.Burner, DrumOn: s.DrumOn, FanOn: s.FanOn, Stirrer: s.Stirrer, Cooler: s.Cooler,
 		Loaded: s.Loaded, Bell: s.bell, SafetyTrip: s.trip, Emergency: s.Emergency, FlameFault: s.FlameFault,
 		TrueBeanT: r1(s.Tb), TrueDrumT: r1(s.Tm), MoisturePct: r1(m), CoolerBeanT: r1(s.coolerT),
