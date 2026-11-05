@@ -1,6 +1,6 @@
 # project-c
 
-Roasting software for a **Carmomaq Caloratto 5 kg** coffee roaster, which talks **Modbus TCP**. The app is in its early days: this repository holds a PLC simulator, a terminal monitor that proves the Modbus link end to end, and a minimal line-based client. Background and decisions: [`docs/context.md`](docs/context.md). Learning notes: [`docs/study-guide.md`](docs/study-guide.md).
+Roasting software for a **Carmomaq Caloratto 5 kg** coffee roaster, which talks **Modbus TCP**. The app is in its early days: this repository holds a PLC simulator, a terminal monitor that proves the Modbus link end to end, and a minimal line-based client. Background and decisions: [`docs/context.md`](docs/context.md). Roadmap: [`docs/roadmap.md`](docs/roadmap.md). Learning notes: [`docs/study-guide.md`](docs/study-guide.md).
 
 | Command | What it is |
 |---|---|

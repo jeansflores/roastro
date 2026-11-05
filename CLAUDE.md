@@ -1,6 +1,6 @@
 # project-c
 
-Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. Go backend and tools now; a TS/React frontend will live in `web/`. Background, machine facts and decisions: `docs/context.md`. Primary sources (manual, electrical schematic): `docs/reference/`.
+Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. Go backend and tools now; a TS/React frontend will live in `web/`. Background, machine facts and decisions: `docs/context.md`. Milestones and feature plan: `docs/roadmap.md`. Primary sources (manual, electrical schematic): `docs/reference/`.
 
 ## Rules
 
@@ -23,7 +23,7 @@ internal/plc     Modbus client: read/write by point name, reconnect with backoff
 internal/roast   pure roast calculations (RoR, ...)
 internal/tui     Bubble Tea model/view for cmd/monitor
 configs/       runtime config (register map)
-docs/          context, study guide, reference PDFs
+docs/          context, roadmap, study guide, reference PDFs
 ```
 
 ## Commands
