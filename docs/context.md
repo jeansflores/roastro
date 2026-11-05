@@ -1,0 +1,161 @@
+# Project context
+
+Written on 2026-11-04 from an earlier claude.ai conversation, to continue the work in Claude Code. Primary sources live in [`reference/`](reference/):
+
+- `operation-manual-rev01.pdf`: "Manual técnico de operação e manutenção – Caloratto 5 e 10 kg", rev. 01, April 2024.
+- `electrical-schematic-weg.pdf`: "CALORATTO - COEL", Actual Soluções em Tecnologia (WEG), 2020-07-14.
+
+## 1. Goal
+
+Jean owns a Carmomaq Caloratto (5 kg) coffee roaster. He used Cropster (paid; the subscription lapsed) and knows Artisan (open source, Python, GPLv3). The goal is our own software to monitor and control the machine, with the charts and settings Artisan lacks.
+
+- Stack: Go backend (Modbus polling, persistence) and a TypeScript/React frontend. Desktop via Wails (Go + TS) or Electron. Main target: Windows.
+- Visual reference: perssua.com (desktop app with its own window, dark and clean). Roast screen: the chart dominates, big numbers on the side.
+- Jean is travelling. Development happens against the simulator. At times a colleague will be at the roastery and can connect the real machine for tests.
+
+## 2. The machine
+
+Specifications:
+
+- Caloratto 5 kg: 5 kg per batch, 20 kg/h, 7,641 kcal/h (LPG) ≈ 8.9 kW.
+- Caloratto 10 kg: 10 kg per batch, 40 kg/h, 11,462 kcal/h (LPG).
+- 220 V single phase. Gas at 30–100 mbar.
+
+### Communication: Ethernet, Modbus TCP (not USB)
+
+- The PLC is at `192.168.5.11`.
+- The PC needs a static IP on the same network. The manual (p. 23) uses `192.168.5.2 / 255.255.255.0`, gateway `192.168.5.11`.
+- In Cropster the connector is "Carmomaq PLC" with host `192.168.5.11`. Channels shown: bean temp (ch0), exhaust (ch1), drum speed (ch2), airflow (ch3) and gas %.
+- According to Cropster's public docs, Caloratto/Masteratto machines built before 2020 used "Generic Modbus over Network (TCP)" with default IP `192.168.0.10`. Jean's machine follows the manual: `192.168.5.11`.
+- Carmomaq's Artisan setup has buttons to turn the stirrer, burner ("power"), fan and drum on and off, and sliders for air, power and drum. The `.aset` settings file is linked on p. 25 of the manual: <https://drive.google.com/file/d/1VOpkJgTtUojalDRGbpgMkGVFJRgIp4W9/view>.
+
+### Internal architecture (from the electrical schematic)
+
+- Central COEL PLC.
+  - AI1: bean thermocouple (BT), terminals 18 and 19.
+  - AI2: air/exhaust thermocouple (ET), terminals 20 and 21.
+  - AI3: gas valve servo position feedback.
+  - AO1: 0–10 V to the gas valve servo (burner power).
+- Inverters: INV1 drum, INV2 fan, INV3 stirrer.
+  - Drum and fan sit on an internal RS-485 bus (PLC COM2, shared with the HMI). This does not affect the software: the PC only talks to the PLC over TCP.
+- Digital inputs (X6): D01 emergency stop, D02 flame failure, D03 hopper sensor, D06 stirrer, D07 cooler.
+- Outputs (X7): D13 bell, D15 burner.
+- INOVA module: hardware flame controller (flame sensor, ignition, gas valve). It cuts the gas on its own, independently of any software.
+- HMI options screen:
+  - "Limite segurança 280 °C" (safety limit);
+  - automatic cooling;
+  - stirrer and cooler timers;
+  - recipes stored in the PLC: up to 50, switching burner, fan and drum % by temperature band, plus an "AUTO MODE".
+
+### Manual p. 16: setting % → drum rpm and airflow (m³/h)
+
+| % | rpm | m³/h | | % | rpm | m³/h |
+|---|---|---|---|---|---|---|
+| 5 | 5 | 71 | | 65 | 42 | 178 |
+| 10 | 8 | 76 | | 70 | 46 | 192 |
+| 15 | 12 | 80 | | 75 | 49 | 203 |
+| 20 | 15 | 83 | | 80 | 52 | 218 |
+| 25 | 17 | 86 | | 85 | 56 | 229 |
+| 30 | 19 | 90 | | 90 | 59 | 240 |
+| 35 | 23 | 105 | | 95 | 62 | 254 |
+| 40 | 26 | 113 | | 100 | 65 | 260 |
+| 45 | 29 | 124 | | 105 | 68 | 271 |
+| 50 | 33 | 136 | | 110 | 71 | 274 |
+| 55 | 36 | 150 | | 115 | 72 | 278 |
+| 60 | 39 | 161 | | 120 | 73 | 282 |
+
+### Normal operation (manual)
+
+1. Heat to 200 °C before the first batch.
+2. Press START on the timer and open the hopper (mechanical lever).
+3. Adjust gas and air during the roast.
+4. Drop: stirrer on, then open the drum door (mechanical).
+5. Cool in the cooling tray.
+6. Never switch the machine off with the beans above 60 °C.
+
+**Charge and drop are mechanical.** The PLC does not command them and the app does not know about them on its own. Either the user presses a Charge/Drop button in the app (as in Cropster and Artisan), or the app detects them: charge from the sharp BT drop, drop from the behavior afterwards. Both can be done.
+
+## 3. Useful external resources
+
+- Artisan repo: <https://github.com/artisan-roaster-scope/artisan>.
+  - PR #1233 (2023), sent by Carmomaq's automation lead, brought updated `.aset` setups for post-2020 Carmomaq machines.
+  - Example command seen there: `write(1,60,1)` turns the pressure fan on and `write(1,60,2)` turns it off.
+  - Those `.aset` files may contain the register map.
+- <https://github.com/turicas/carmomaq>: utilities to collect data from and control Carmomaq roasters.
+- License: Artisan is GPLv3. Reading the `.aset` files to learn the map is fine. Copying Artisan code would make this project GPL. The plan is to write our own code.
+
+## 4. Remote access (decision)
+
+- **Never expose port 502 to the internet.** Modbus has no authentication.
+- Plan: a Raspberry Pi (or mini PC) next to the machine, wired into `192.168.5.x`, online via Wi-Fi or 4G, running Tailscale as a subnet router (`sudo tailscale up --advertise-routes=192.168.5.0/24`, then approve the route in the admin panel).
+- Quick alternative: install Tailscale or RDP on the roasting PC that already lives there.
+- The PLC only answers with the machine's main switch on.
+- **Safety rule: remote access is read-only.** Writes (gas, burner, etc.) only with someone physically next to the machine. It is a 5 kg gas roaster, and the fire procedure requires a person present.
+
+## 5. What exists so far
+
+A PLC simulator and a probe client, described in the [README](../README.md). Dependency: `github.com/simonvetter/modbus` (Modbus TCP/RTU server and client).
+
+Two channels in the simulator:
+
+- **Modbus (:5502)**: the operator or the app commanding the machine. Same channel as the real machine.
+- **HTTP (:8080)**: the "physical world" and shortcuts that do not exist on the machine (`/state`, `/charge`, `/drop`, `/preheat`, `/fault`, `/speed`, `/reset`). `/state` also returns the internal truth (`truth_bean_temp`, `truth_moisture_pct`) to validate the app's event detection.
+
+Register map points (the **names** are fixed; `addr`/`kind`/`scale` are made up):
+
+- holding: `bt`(0, ×10, signed), `et`(1, ×10, signed), `gas_cmd`(2, W), `gas_fb`(3), `drum`(4, W), `fan`(5, W), `roast_point`(6, ×10, W), `timer_s`(7)
+- coil: `burner`(0), `drum_on`(1), `fan_on`(2), `stirrer`(3), `cooler`(4), all writable
+- discrete: `emergency`(0), `flame_fault`(1), `hopper_sensor`(2), `bell`(3), `safety_trip`(4)
+
+When the real `.aset` arrives, only `configs/regmap.json` changes.
+
+### Thermal model
+
+Lumped parameters, tuned to look real:
+
+- Nodes: drum temperature (Tm) and bean temperature (Tb). 11% moisture evaporates above 100 °C. Exothermic bump near 200 °C.
+- Heat: part of the burner output reaches the beans by convection (depends on airflow); the rest heats the drum, which passes it on by contact (depends on rpm).
+- Probes with lag: BT τ ≈ 38 s with coffee, ET τ ≈ 10 s, ±0.25 °C noise.
+- Gas servo with lag; valves close fast without flame.
+- Autopilot result: TP ≈ 81 °C at ~1:15, RoR peaking ~25 °C/min and falling to ~8, ~196 °C at 8–9 min, drop at 210 °C at ~10:45, final moisture ~2%, weight loss ~9% (real: 12–15%; no organic loss in the model).
+
+**Assumed interlocks** (to confirm on the real machine):
+
+- burner only with drum and fan on;
+- emergency stop turns everything off and refuses to relight the burner;
+- flame failure closes the gas;
+- the 280 °C limit cuts the burner; it clears below 260 °C;
+- bell when BT ≥ roast point.
+
+## 6. Next steps
+
+Agreed:
+
+- Start the app on top of the simulator. First milestone: a terminal monitor (`cmd/monitor`) proving that the Modbus link works end to end, including reconnection and writes.
+
+Proposed, not yet decided:
+
+- A `scenario.json` for the simulator with three blocks:
+  - machine: power, inertia, probe noise, a Caloratto 10 kg preset;
+  - coffee: moisture, density, green temperature;
+  - faults: loose or stuck thermocouple, spikes, latency, timeouts, connection dropping mid-roast (it will happen over Tailscale), PLC refusing writes.
+
+Ideas for the app:
+
+1. Go backend: 1 Hz polling, time series in SQLite, automatic reconnection, events (charge, TP, DE, first crack, drop), both manual and auto-detected.
+2. Calculations: RoR (configurable window, smoothing), phases (drying, Maillard, development), DTR, background reference curve, comparing roasts.
+3. Show rpm and m³/h next to % (table above).
+4. TS frontend: live roast screen, history, profiles.
+5. Control (writes) later, with confirmation in the UI and blocked over remote access.
+
+First test on the real machine (when the colleague is there):
+
+- Read-only, with the probe on `192.168.5.x`.
+- Record a CSV, which also helps calibrate the simulator.
+- Or scan registers with QModMaster/modpoll to discover the map.
+
+## Appendix A: open questions
+
+- The real register map: in Carmomaq's `.aset` (link above) or in the `.aset` files in the Artisan repo. Alternatives: sniff with Wireshark while Artisan runs, or scan with QModMaster.
+- Confirm the PLC's real interlocks.
+- Exact year of the machine (the schematic is from 2020-07; the manual is rev. 2024).
