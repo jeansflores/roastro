@@ -1,17 +1,51 @@
 # project-c
 
-Roasting software for a **Carmomaq Caloratto 5 kg** coffee roaster, which talks **Modbus TCP**. The app does not exist yet; this repository currently holds a PLC simulator and a minimal client, so development can happen away from the machine.
+Roasting software for a **Carmomaq Caloratto 5 kg** coffee roaster, which talks **Modbus TCP**. The app is in its early days: this repository holds a PLC simulator, a terminal monitor that proves the Modbus link end to end, and a minimal line-based client. Background and decisions: [`docs/context.md`](docs/context.md). Learning notes: [`docs/study-guide.md`](docs/study-guide.md).
 
-`cmd/sim` pretends to be the PLC. It runs a thermal model with a drum, beans, moisture, probes with thermal lag, a gas valve servo and interlocks. `cmd/probe` is a minimal Modbus client that reads, computes RoR, writes CSV and sends commands. It behaves the same against the simulator and the real machine.
+| Command | What it is |
+|---|---|
+| `cmd/sim` | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
+| `cmd/monitor` | Live terminal dashboard: roast values, link health, keyboard commands, automatic reconnection |
+| `cmd/probe` | One line per reading, optional CSV, one-off writes |
+
+All three behave the same against the simulator and the real machine.
 
 ## Run
 
+Requires Go 1.27. Run from the repository root.
+
 ```bash
-go run ./cmd/sim --auto --speed 10     # roasts on its own in a loop, 10x faster
-go run ./cmd/probe --time-scale 10     # in another terminal
+make run-sim     # simulator with the autopilot, 10x faster (SPEED=10)
+make monitor     # dashboard against it, in another terminal
+make help        # everything else
 ```
 
-`--auto` turns on an "operator" that preheats, charges 5 kg at 200 °C, adjusts gas and air by temperature band, drops at 210 °C, cools and starts over. Without `--auto`, you (or your app) are in control.
+`--auto` (used by `make run-sim`) turns on an "operator" that preheats, charges 5 kg at 200 °C, adjusts gas and air by temperature band, drops at 210 °C, cools and starts over. Without `--auto`, you (or your app) are in control. To skip the cold warm-up: `curl 'localhost:8080/preheat?temp=200'`.
+
+### Monitor
+
+```
+project-c monitor  tcp://127.0.0.1:5502  ● CONNECTED  writes enabled
+╭──────────────────────────────────────────╮ ╭──────────────────────────────────────────╮
+│ Roast                                    │ │ Link                                     │
+│                                          │ │                                          │
+│ BT        124.8 °C   RoR +15.6 °C/min    │ │ Status   connected                       │
+│ ET        171.9 °C                       │ │ Latency  540µs                           │
+│ Timer    03:53                           │ │ Last OK  0.6 s ago                       │
+│                                          │ │ Polls    245  ok 241  failed 4           │
+│ Gas       80 %  (valve  80 %)            │ │ Last err                                 │
+│ Drum      80 %   52 rpm                  │ │ plc: read holding 0+8: EOF               │
+│ Air       45 %  124 m³/h                 │ ╰──────────────────────────────────────────╯
+│                                          │
+│ BURNER DRUM FAN stirrer cooler           │
+╰──────────────────────────────────────────╯
+b burner · d drum · f fan · s stirrer · c cooler · +/- gas · ]/[ air · }/{ drum · q quit
+```
+
+- Polls every point once per `--interval` (1 s). When the PLC goes away the header turns red and the poller backs off 1 s, 2 s, 4 s, 8 s, 10 s; it reconnects by itself.
+- `--time-scale` must match the simulator's `--speed` for RoR to come out in roast °C/min.
+- Logs go to `monitor.log` (`--log`, `--log-level`), because the terminal belongs to the dashboard.
+- Keys only work against localhost unless you pass `--allow-write`.
 
 ### Simulator panel (HTTP :8080)
 
