@@ -1,9 +1,10 @@
-// probe: cliente Modbus mínimo. Serve contra o simulador e contra a máquina real.
+// Command probe is a minimal Modbus client. It works against both the
+// simulator and the real machine.
 //
-//	go run ./cmd/probe                                   # lê e imprime a cada 1s
-//	go run ./cmd/probe --csv torra.csv                   # grava CSV também
-//	go run ./cmd/probe set burner=1 gas_cmd=60           # escreve (só localhost)
-//	go run ./cmd/probe --url tcp://192.168.5.11:502      # máquina real, só leitura
+//	go run ./cmd/probe                                   # read and print every 1s
+//	go run ./cmd/probe --csv roast.csv                   # also write a CSV
+//	go run ./cmd/probe set burner=1 gas_cmd=60           # write (localhost only)
+//	go run ./cmd/probe --url tcp://192.168.5.11:502      # real machine, read-only
 package main
 
 import (
@@ -25,12 +26,12 @@ import (
 )
 
 func main() {
-	addr := flag.String("url", "tcp://127.0.0.1:5502", "CLP (máquina real: tcp://192.168.5.11:502)")
-	mapPath := flag.String("map", "configs/regmap.json", "mapa de registradores")
-	every := flag.Duration("interval", time.Second, "intervalo de leitura")
-	csvPath := flag.String("csv", "", "grava as leituras em CSV")
-	scale := flag.Float64("time-scale", 1, "use o mesmo --speed do simulador para o RoR sair em °C/min simulado")
-	allowWrite := flag.Bool("allow-write", false, "libera escrita em host que não é localhost (máquina real!)")
+	addr := flag.String("url", "tcp://127.0.0.1:5502", "PLC address (real machine: tcp://192.168.5.11:502)")
+	mapPath := flag.String("map", "configs/regmap.json", "register map")
+	every := flag.Duration("interval", time.Second, "polling interval")
+	csvPath := flag.String("csv", "", "write readings to a CSV file")
+	scale := flag.Float64("time-scale", 1, "use the simulator --speed so RoR comes out in simulated °C/min")
+	allowWrite := flag.Bool("allow-write", false, "allow writes to a non-localhost target (real machine!)")
 	flag.Parse()
 
 	m, err := regmap.Load(*mapPath)
@@ -38,14 +39,14 @@ func main() {
 		log.Fatal(err)
 	}
 	if flag.Arg(0) == "set" && !isLocal(*addr) && !*allowWrite {
-		log.Fatal("escrita bloqueada: alvo não é localhost. Use --allow-write SÓ com alguém ao lado da máquina.")
+		log.Fatal("write blocked: target is not localhost. Use --allow-write ONLY with someone standing next to the machine.")
 	}
 	c, err := modbus.NewClient(&modbus.ClientConfiguration{URL: *addr, Timeout: 2 * time.Second})
 	if err != nil {
 		log.Fatal(err)
 	}
 	if err := c.Open(); err != nil {
-		log.Fatalf("não conectou em %s: %v", *addr, err)
+		log.Fatalf("could not connect to %s: %v", *addr, err)
 	}
 	defer c.Close()
 	c.SetUnitId(m.UnitID)
@@ -75,11 +76,11 @@ func isLocal(u string) bool {
 func write(c *modbus.ModbusClient, m *regmap.Map, kv string) error {
 	name, val, ok := strings.Cut(kv, "=")
 	if !ok {
-		return fmt.Errorf("use nome=valor")
+		return fmt.Errorf("use name=value")
 	}
 	p, ok := m.ByName(name)
 	if !ok || !p.Writable {
-		return fmt.Errorf("ponto inexistente ou não gravável")
+		return fmt.Errorf("unknown or non-writable point")
 	}
 	v, err := strconv.ParseFloat(val, 64)
 	if err != nil {
@@ -91,7 +92,7 @@ func write(c *modbus.ModbusClient, m *regmap.Map, kv string) error {
 	return c.WriteRegister(p.Addr, p.Encode(v))
 }
 
-// readAll lê cada tipo em um bloco contíguo (menos round-trips).
+// readAll reads each kind as one contiguous block (fewer round trips).
 func readAll(c *modbus.ModbusClient, m *regmap.Map) (map[string]float64, error) {
 	out := map[string]float64{}
 	byKind := map[regmap.Kind][]regmap.Point{}
@@ -169,10 +170,10 @@ func poll(c *modbus.ModbusClient, m *regmap.Map, every time.Duration, csvPath st
 		v, err := readAll(c, m)
 		now := time.Now()
 		if err != nil {
-			log.Printf("leitura falhou: %v", err)
+			log.Printf("read failed: %v", err)
 			continue
 		}
-		// RoR em °C/min sobre janela de 30s (de tempo simulado)
+		// RoR in °C/min over a 30 s window (simulated time)
 		hist = append(hist, sample{now, v["bt"]})
 		win := time.Duration(float64(30*time.Second) / scale)
 		for len(hist) > 2 && now.Sub(hist[1].t) >= win {
@@ -188,7 +189,7 @@ func poll(c *modbus.ModbusClient, m *regmap.Map, every time.Duration, csvPath st
 				flags += " " + strings.ToUpper(f)
 			}
 		}
-		fmt.Printf("%s  t=%4.0fs  BT=%6.1f  ET=%6.1f  RoR=%6.1f  gas=%3.0f/%3.0f%%  ar=%3.0f%%  tambor=%3.0f%%%s\n",
+		fmt.Printf("%s  t=%4.0fs  BT=%6.1f  ET=%6.1f  RoR=%6.1f  gas=%3.0f/%3.0f%%  air=%3.0f%%  drum=%3.0f%%%s\n",
 			now.Format("15:04:05"), v["timer_s"], v["bt"], v["et"], ror, v["gas_cmd"], v["gas_fb"], v["fan"], v["drum"], flags)
 
 		if cw != nil {

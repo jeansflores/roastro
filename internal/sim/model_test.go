@@ -2,7 +2,7 @@ package sim
 
 import "testing"
 
-// Garante que a curva continua com "cara de torra" se alguém mexer nos parâmetros.
+// Guards that the curve still looks like a roast when someone tunes the parameters.
 func TestRoastLooksReal(t *testing.T) {
 	s := New(1)
 	ap := NewAutopilot()
@@ -27,13 +27,13 @@ func TestRoastLooksReal(t *testing.T) {
 		}
 	}
 	if !charged || dropAt == 0 {
-		t.Fatal("autopilot não completou uma torra")
+		t.Fatal("autopilot did not complete a roast")
 	}
 	if tp < 70 || tp > 105 || tpT < 50 || tpT > 120 {
-		t.Errorf("turning point fora do esperado: %.1f °C em %.0fs", tp, tpT)
+		t.Errorf("turning point out of range: %.1f °C at %.0fs", tp, tpT)
 	}
 	if dropAt < 480 || dropAt > 900 {
-		t.Errorf("duração da torra fora do esperado: %.0fs", dropAt)
+		t.Errorf("roast duration out of range: %.0fs", dropAt)
 	}
 	t.Logf("TP %.1f °C @ %.0fs, drop @ %.0fs", tp, tpT, dropAt)
 }
@@ -49,10 +49,10 @@ func TestEmergencyCutsEverything(t *testing.T) {
 	s.Step(5)
 	sn := s.Snapshot()
 	if sn.Burner || sn.FanOn || sn.DrumOn || sn.GasFb > 1 {
-		t.Fatalf("emergência não cortou: %+v", sn)
+		t.Fatalf("emergency stop did not cut power: %+v", sn)
 	}
 	if err := s.Set("burner", 1); err == nil {
-		t.Fatal("deveria recusar ligar queimador em emergência")
+		t.Fatal("should refuse to light the burner during an emergency stop")
 	}
 }
 
@@ -66,6 +66,6 @@ func TestFlameFaultClosesGas(t *testing.T) {
 	s.SetFault("flame", true)
 	s.Step(10)
 	if s.Snapshot().GasFb > 1 {
-		t.Fatal("falta de chama não fechou o gás")
+		t.Fatal("flame failure did not close the gas valve")
 	}
 }

@@ -1,6 +1,7 @@
-// Package sim é um modelo térmico simplificado da Caloratto 5 kg.
-// Não é física exata: é calibrado para gerar curvas com cara de torra real
-// (turning point, RoR caindo, dip do ET na carga, 1º crack perto de 196 °C).
+// Package sim is a simplified thermal model of the Caloratto 5 kg roaster.
+// It is not exact physics: it is tuned to produce curves that look like a
+// real roast (turning point, declining RoR, ET dip at charge, first crack
+// around 196 °C).
 package sim
 
 import (
@@ -11,16 +12,16 @@ import (
 )
 
 const (
-	pMaxW       = 8886.0 // 7.641 kcal/h (GLP), do manual
+	pMaxW       = 8886.0 // 7,641 kcal/h (LPG), from the manual
 	burnerEff   = 0.80
-	drumCap     = 25000.0 // J/K, massa do cilindro + carcaça
-	lossW       = 5.0     // W/K perda pela carcaça
-	exhaustFrac = 0.12    // fração do ar quente que realmente leva calor embora
-	safetyLimit = 280.0   // "Limite segurança" da tela de opções
+	drumCap     = 25000.0 // J/K, drum + housing mass
+	lossW       = 5.0     // W/K loss through the housing
+	exhaustFrac = 0.12    // fraction of hot air that actually carries heat away
+	safetyLimit = 280.0   // "Limite segurança" on the HMI options screen
 	latentJkg   = 2.26e6
 )
 
-// Tabela da pág. 16 do manual: % -> vazão de ar (m³/h)
+// Manual p. 16: fan % -> airflow (m³/h)
 var fanTable = [][2]float64{
 	{0, 0}, {5, 71}, {10, 76}, {15, 80}, {20, 83}, {25, 86}, {30, 90}, {35, 105},
 	{40, 113}, {45, 124}, {50, 136}, {55, 150}, {60, 161}, {65, 178}, {70, 192},
@@ -28,7 +29,7 @@ var fanTable = [][2]float64{
 	{110, 274}, {115, 278}, {120, 282},
 }
 
-// Tabela da pág. 16: % -> rpm do cilindro
+// Manual p. 16: drum % -> rpm
 var drumTable = [][2]float64{
 	{0, 0}, {5, 5}, {10, 8}, {15, 12}, {20, 15}, {25, 17}, {30, 19}, {35, 23}, {40, 26},
 	{45, 29}, {50, 33}, {55, 36}, {60, 39}, {65, 42}, {70, 46}, {75, 49}, {80, 52},
@@ -60,20 +61,20 @@ type Event struct {
 type Sim struct {
 	mu sync.Mutex
 
-	// comandos (o que o CLP recebe)
+	// commands (what the PLC receives)
 	GasCmd, Drum, Fan, RoastPoint          float64
 	Burner, DrumOn, FanOn, Stirrer, Cooler bool
 
-	// falhas injetáveis
+	// injectable faults
 	Emergency, FlameFault bool
 
-	// estado físico
+	// physical state
 	Tamb, Tm, Tb, BTprobe, ETprobe, GasFb float64
 	Loaded                                bool
 	beanKg, waterKg, dryKg, chargeKg      float64
 	coolerT                               float64
 
-	// estado do CLP
+	// PLC state
 	T, chargeAt, lastTimer float64
 	running, bell, trip    bool
 	hopperUntil            float64
@@ -102,7 +103,7 @@ func (s *Sim) event(name, info string) {
 	}
 }
 
-// Step avança a simulação dt segundos (tempo simulado).
+// Step advances the simulation by dt seconds of simulated time.
 func (s *Sim) Step(dt float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -117,10 +118,10 @@ func (s *Sim) Step(dt float64) {
 func (s *Sim) step(dt float64) {
 	s.T += dt
 
-	// Intertravamentos que um CLP de torrador tipicamente tem.
+	// Interlocks a roaster PLC typically has.
 	if s.Emergency {
 		if s.Burner || s.DrumOn || s.FanOn || s.Stirrer || s.Cooler {
-			s.event("emergency_stop", "tudo desligado")
+			s.event("emergency_stop", "everything off")
 		}
 		s.Burner, s.DrumOn, s.FanOn, s.Stirrer, s.Cooler = false, false, false, false, false
 	}
@@ -133,14 +134,14 @@ func (s *Sim) step(dt float64) {
 	}
 	firing := s.Burner && s.FanOn && s.DrumOn && !s.FlameFault && !s.trip
 
-	// Servo da válvula: segue o comando com atraso e limite de velocidade.
+	// Valve servo: follows the command with lag and a slew-rate limit.
 	target := 0.0
 	if firing {
 		target = clamp(s.GasCmd, 0, 100)
 	}
 	tau := 1.5
 	if !firing {
-		tau = 0.4 // válvulas de segurança fecham na hora
+		tau = 0.4 // safety valves close almost instantly
 	}
 	step := (target - s.GasFb) * dt / tau
 	s.GasFb += clamp(step, -60*dt, 20*dt)
@@ -149,8 +150,8 @@ func (s *Sim) step(dt float64) {
 		P = s.GasFb / 100 * pMaxW
 	}
 
-	// Ar
-	q := 10.0 // tiragem natural com ventilador desligado
+	// Air
+	q := 10.0 // natural draft with the fan off
 	if s.FanOn {
 		q = AirflowM3h(s.Fan)
 	}
@@ -160,20 +161,20 @@ func (s *Sim) step(dt float64) {
 		drumF = 0.6 + 0.4*clamp(s.Drum/100, 0, 1.2)
 	}
 
-	// Parte do calor do queimador chega no grão direto pelo ar quente
-	// (convecção); o resto aquece o cilindro, que passa calor por contato.
+	// Part of the burner heat reaches the beans directly through hot air
+	// (convection); the rest heats the drum, which passes it on by contact.
 	Pin := burnerEff * P
 	Qb, Qconv, Qevap, Qexo := 0.0, 0.0, 0.0, 0.0
 	if s.Loaded {
 		airF := clamp(q/150, 0.4, 1.3)
-		const tGas = 420.0 // temperatura nominal do ar quente que entra no tambor
+		const tGas = 420.0 // nominal temperature of the hot air entering the drum
 		Qconv = 0.6 * airF * Pin * clamp(s.beanKg/5, 0.2, 1.2) * clamp((tGas-s.Tb)/(tGas-25), 0, 1)
 		ub := (10 + 0.2*mcp) * drumF * (s.beanKg / 5)
 		Qb = ub*(s.Tm-s.Tb) + Qconv
 		if s.waterKg > 0 && s.Tb > 100 {
-			// Simplificação: a perda de água segue a taxa "física", mas o custo
-			// energético é limitado para não travar a curva (o modelo não tem
-			// gradiente interno no grão).
+			// Simplification: water loss follows the "physical" rate, but its
+			// energy cost is capped so the curve does not stall (the model has
+			// no temperature gradient inside the bean).
 			rate := 5e-5 * (s.Tb - 100) * s.waterKg // kg/s
 			Qevap = math.Min(rate*latentJkg, 0.45*math.Max(Qb, 0))
 			s.waterKg = math.Max(0, s.waterKg-rate*dt)
@@ -185,7 +186,7 @@ func (s *Sim) step(dt float64) {
 	}
 	s.Tm += (Pin - Qconv - (exhaustFrac*mcp+lossW)*(s.Tm-s.Tamb) - (Qb - Qconv)) / drumCap * dt
 
-	// Sondas (termopares) com inércia
+	// Probes (thermocouples) with thermal lag
 	etTarget := s.Tamb + (s.Tm-s.Tamb)*0.96
 	btTarget := s.Tamb + (s.Tm-s.Tamb)*0.93
 	btTau := 20.0
@@ -197,7 +198,7 @@ func (s *Sim) step(dt float64) {
 	s.ETprobe += (etTarget - s.ETprobe) * dt / 10
 	s.BTprobe += (btTarget - s.BTprobe) * dt / btTau
 
-	// Resfriador
+	// Cooling tray
 	ct := 400.0
 	if s.Cooler && s.Stirrer {
 		ct = 45
@@ -206,7 +207,7 @@ func (s *Sim) step(dt float64) {
 
 	if s.running && s.RoastPoint > 0 && s.BTprobe >= s.RoastPoint && !s.bell {
 		s.bell = true
-		s.event("bell", fmt.Sprintf("ponto de torra %.1f °C", s.RoastPoint))
+		s.event("bell", fmt.Sprintf("roast point %.1f °C", s.RoastPoint))
 	}
 }
 
@@ -214,10 +215,10 @@ func (s *Sim) Charge(kg, greenT float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.Loaded {
-		return fmt.Errorf("já tem café no cilindro")
+		return fmt.Errorf("drum already loaded")
 	}
 	if kg <= 0 || kg > 6 {
-		return fmt.Errorf("carga fora da faixa (0-6 kg)")
+		return fmt.Errorf("batch size out of range (0-6 kg)")
 	}
 	s.Loaded, s.chargeKg, s.beanKg = true, kg, kg
 	s.waterKg = kg * 0.11
@@ -233,17 +234,17 @@ func (s *Sim) Drop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !s.Loaded {
-		return fmt.Errorf("cilindro vazio")
+		return fmt.Errorf("drum is empty")
 	}
 	loss := (1 - s.beanKg/s.chargeKg) * 100
-	s.event("drop", fmt.Sprintf("BT %.1f, %.0fs, perda %.1f%%", s.BTprobe, s.T-s.chargeAt, loss))
+	s.event("drop", fmt.Sprintf("BT %.1f, %.0fs, weight loss %.1f%%", s.BTprobe, s.T-s.chargeAt, loss))
 	s.coolerT = s.Tb
 	s.Loaded, s.running = false, false
 	s.lastTimer = s.T - s.chargeAt
 	return nil
 }
 
-// Preheat pula o aquecimento (só para testes).
+// Preheat skips the warm-up (test shortcut only).
 func (s *Sim) Preheat(t float64) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -260,7 +261,7 @@ func (s *Sim) SetFault(name string, on bool) error {
 	case "flame":
 		s.FlameFault = on
 	default:
-		return fmt.Errorf("falha desconhecida %q (use emergency|flame)", name)
+		return fmt.Errorf("unknown fault %q (use emergency|flame)", name)
 	}
 	s.event("fault_"+name, fmt.Sprint(on))
 	return nil
@@ -268,7 +269,7 @@ func (s *Sim) SetFault(name string, on bool) error {
 
 func (s *Sim) noise() float64 { return s.rng.NormFloat64() * 0.25 }
 
-// Get devolve o valor "como o CLP reportaria" para um nome do regmap.
+// Get returns the value of a regmap point as the PLC would report it.
 func (s *Sim) Get(name string) (float64, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -325,10 +326,10 @@ func (s *Sim) get(name string) (float64, error) {
 	case "safety_trip":
 		return b(s.trip), nil
 	}
-	return 0, fmt.Errorf("ponto desconhecido %q", name)
+	return 0, fmt.Errorf("unknown point %q", name)
 }
 
-// Set aplica uma escrita vinda do Modbus.
+// Set applies a write coming from Modbus.
 func (s *Sim) Set(name string, v float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -345,7 +346,7 @@ func (s *Sim) Set(name string, v float64) error {
 		s.RoastPoint = clamp(v, 0, 260)
 	case "burner":
 		if on && s.Emergency {
-			return fmt.Errorf("emergência acionada")
+			return fmt.Errorf("emergency stop engaged")
 		}
 		s.Burner = on
 	case "drum_on":
@@ -357,7 +358,7 @@ func (s *Sim) Set(name string, v float64) error {
 	case "cooler":
 		s.Cooler = on && !s.Emergency
 	default:
-		return fmt.Errorf("ponto %q não é gravável", name)
+		return fmt.Errorf("point %q is not writable", name)
 	}
 	if fmt.Sprint(s.getLocked(name)) != before {
 		s.event("write", fmt.Sprintf("%s=%g", name, v))
@@ -365,8 +366,8 @@ func (s *Sim) Set(name string, v float64) error {
 	return nil
 }
 
-// Snapshot inclui a "verdade" interna (temp. real do grão, umidade) para
-// depurar a detecção de eventos do seu app. O CLP real não expõe isso.
+// Snapshot includes the internal "truth" (actual bean temperature, moisture)
+// to help validate the app's event detection. The real PLC does not expose it.
 type Snapshot struct {
 	SimTime      float64 `json:"sim_time_s"`
 	BT           float64 `json:"bt"`

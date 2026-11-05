@@ -1,4 +1,4 @@
-// caloratto-sim: finge ser o CLP da Caloratto falando Modbus TCP.
+// Command sim pretends to be the Caloratto PLC speaking Modbus TCP.
 //
 //	go run ./cmd/sim --auto --speed 10
 package main
@@ -19,7 +19,7 @@ import (
 	"github.com/jeansflores/project-c/internal/sim"
 )
 
-// handler traduz requisições Modbus em leituras/escritas no modelo.
+// handler translates Modbus requests into reads and writes on the model.
 type handler struct {
 	m *regmap.Map
 	s *sim.Sim
@@ -71,7 +71,7 @@ func (h *handler) HandleCoils(r *modbus.CoilsRequest) ([]bool, error) {
 			val = 1
 		}
 		if err := h.s.Set(p.Name, val); err != nil {
-			log.Printf("escrita recusada %s: %v", p.Name, err)
+			log.Printf("write refused %s: %v", p.Name, err)
 			return nil, modbus.ErrServerDeviceFailure
 		}
 		log.Printf("[%s] coil %s=%v", r.ClientAddr, p.Name, v)
@@ -114,11 +114,11 @@ func (h *handler) HandleInputRegisters(r *modbus.InputRegistersRequest) ([]uint1
 }
 
 func main() {
-	listen := flag.String("modbus", "tcp://0.0.0.0:5502", "endereço Modbus TCP (a máquina real usa :502)")
-	httpAddr := flag.String("http", ":8080", "painel de controle HTTP do simulador")
-	mapPath := flag.String("map", "configs/regmap.json", "mapa de registradores")
-	speed := flag.Float64("speed", 1, "aceleração do tempo (10 = uma torra de 10 min em 1 min)")
-	auto := flag.Bool("auto", false, "autopilot: torra sozinho em loop")
+	listen := flag.String("modbus", "tcp://0.0.0.0:5502", "Modbus TCP listen address (the real machine uses :502)")
+	httpAddr := flag.String("http", ":8080", "simulator HTTP control panel")
+	mapPath := flag.String("map", "configs/regmap.json", "register map")
+	speed := flag.Float64("speed", 1, "time acceleration (10 = a 10 min roast in 1 min)")
+	auto := flag.Bool("auto", false, "autopilot: roast on its own in a loop")
 	flag.Parse()
 
 	m, err := regmap.Load(*mapPath)
@@ -131,7 +131,7 @@ func main() {
 		ap = sim.NewAutopilot()
 	}
 	spd := *speed
-	var ctl sync.Mutex // protege spd e ap entre o laço de física e o HTTP
+	var ctl sync.Mutex // guards spd and ap between the physics loop and HTTP
 
 	srv, err := modbus.NewServer(&modbus.ServerConfiguration{
 		URL: *listen, Timeout: 60 * time.Second, MaxClients: 8,
@@ -142,9 +142,9 @@ func main() {
 	if err := srv.Start(); err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("Modbus TCP em %s (unit %d), velocidade %gx, autopilot=%v", *listen, m.UnitID, spd, *auto)
+	log.Printf("Modbus TCP on %s (unit %d), speed %gx, autopilot=%v", *listen, m.UnitID, spd, *auto)
 
-	// Laço de física: 10 Hz de tempo real.
+	// Physics loop: 10 Hz of wall-clock time.
 	go func() {
 		tk := time.NewTicker(100 * time.Millisecond)
 		acc := 0.0
@@ -152,7 +152,7 @@ func main() {
 			ctl.Lock()
 			s.Step(0.1 * spd)
 			acc += 0.1 * spd
-			if ap != nil && acc >= 1 { // operador decide 1x por segundo simulado
+			if ap != nil && acc >= 1 { // the operator decides once per simulated second
 				ap.Tick(s)
 				acc = 0
 			}
@@ -206,6 +206,6 @@ func main() {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprintln(w, "caloratto-sim: GET /state | /charge?kg=5 | /drop | /preheat?temp=200 | /reset | /fault?name=flame|emergency&on=1|0 | /speed?x=10")
 	})
-	log.Printf("painel HTTP em http://localhost%s", *httpAddr)
+	log.Printf("HTTP panel on http://localhost%s", *httpAddr)
 	log.Fatal(http.ListenAndServe(*httpAddr, mux))
 }

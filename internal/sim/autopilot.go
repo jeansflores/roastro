@@ -1,11 +1,11 @@
 package sim
 
-// Autopilot faz o papel de um operador: pré-aquece, carrega, ajusta gás/ar
-// por faixa de temperatura, descarrega e repete. Serve para ter dados
-// contínuos chegando no app sem ninguém mexendo.
+// Autopilot plays the operator: it preheats, charges, adjusts gas and air by
+// temperature band, drops and starts over. It keeps data flowing into the app
+// with nobody at the controls.
 type Autopilot struct {
-	ChargeTemp float64 // BT para carregar
-	DropTemp   float64 // BT para descarregar
+	ChargeTemp float64 // BT at which to charge
+	DropTemp   float64 // BT at which to drop
 	BatchKg    float64
 	phase      string
 	waitUntil  float64
@@ -20,7 +20,7 @@ func (a *Autopilot) Phase() string { return a.phase }
 func (a *Autopilot) Tick(s *Sim) {
 	snap := s.Snapshot()
 	if snap.Emergency || snap.FlameFault {
-		return // falha injetada: o "operador" espera você limpar
+		return // injected fault: the "operator" waits for you to clear it
 	}
 	switch a.phase {
 	case "start":
@@ -33,7 +33,7 @@ func (a *Autopilot) Tick(s *Sim) {
 		s.Set("burner", 1)
 		a.phase = "preheat"
 	case "preheat":
-		// segura o BT perto da temperatura de carga
+		// hold BT near the charge temperature
 		switch {
 		case snap.BT < a.ChargeTemp-10:
 			s.Set("gas_cmd", 75)
@@ -47,7 +47,7 @@ func (a *Autopilot) Tick(s *Sim) {
 		}
 	case "roast":
 		switch {
-		case snap.RoastElapsed < 90 || snap.BT < 150: // até o turning point a sonda engana
+		case snap.RoastElapsed < 90 || snap.BT < 150: // the probe is misleading until the turning point
 			s.Set("gas_cmd", 80)
 		case snap.BT < 185:
 			s.Set("gas_cmd", 70)
