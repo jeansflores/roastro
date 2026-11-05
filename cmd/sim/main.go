@@ -8,6 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"sync"
@@ -18,100 +19,6 @@ import (
 	"github.com/jeansflores/project-c/internal/regmap"
 	"github.com/jeansflores/project-c/internal/sim"
 )
-
-// handler translates Modbus requests into reads and writes on the model.
-type handler struct {
-	m *regmap.Map
-	s *sim.Sim
-}
-
-func (h *handler) checkUnit(id uint8) error {
-	if id != h.m.UnitID && id != 0 && id != 255 {
-		return modbus.ErrGWTargetFailedToRespond
-	}
-	return nil
-}
-
-func (h *handler) readBools(k regmap.Kind, addr, qty uint16) []bool {
-	out := make([]bool, qty)
-	for i := range out {
-		if p, ok := h.m.At(k, addr+uint16(i)); ok {
-			v, _ := h.s.Get(p.Name)
-			out[i] = v != 0
-		}
-	}
-	return out
-}
-
-func (h *handler) readRegs(k regmap.Kind, addr, qty uint16) []uint16 {
-	out := make([]uint16, qty)
-	for i := range out {
-		if p, ok := h.m.At(k, addr+uint16(i)); ok {
-			v, _ := h.s.Get(p.Name)
-			out[i] = p.Encode(v)
-		}
-	}
-	return out
-}
-
-func (h *handler) HandleCoils(r *modbus.CoilsRequest) ([]bool, error) {
-	if err := h.checkUnit(r.UnitId); err != nil {
-		return nil, err
-	}
-	if !r.IsWrite {
-		return h.readBools(regmap.Coil, r.Addr, r.Quantity), nil
-	}
-	for i, v := range r.Args {
-		p, ok := h.m.At(regmap.Coil, r.Addr+uint16(i))
-		if !ok || !p.Writable {
-			return nil, modbus.ErrIllegalDataAddress
-		}
-		val := 0.0
-		if v {
-			val = 1
-		}
-		if err := h.s.Set(p.Name, val); err != nil {
-			log.Printf("write refused %s: %v", p.Name, err)
-			return nil, modbus.ErrServerDeviceFailure
-		}
-		log.Printf("[%s] coil %s=%v", r.ClientAddr, p.Name, v)
-	}
-	return nil, nil
-}
-
-func (h *handler) HandleDiscreteInputs(r *modbus.DiscreteInputsRequest) ([]bool, error) {
-	if err := h.checkUnit(r.UnitId); err != nil {
-		return nil, err
-	}
-	return h.readBools(regmap.Discrete, r.Addr, r.Quantity), nil
-}
-
-func (h *handler) HandleHoldingRegisters(r *modbus.HoldingRegistersRequest) ([]uint16, error) {
-	if err := h.checkUnit(r.UnitId); err != nil {
-		return nil, err
-	}
-	if !r.IsWrite {
-		return h.readRegs(regmap.Holding, r.Addr, r.Quantity), nil
-	}
-	for i, raw := range r.Args {
-		p, ok := h.m.At(regmap.Holding, r.Addr+uint16(i))
-		if !ok || !p.Writable {
-			return nil, modbus.ErrIllegalDataAddress
-		}
-		if err := h.s.Set(p.Name, p.Decode(raw)); err != nil {
-			return nil, modbus.ErrServerDeviceFailure
-		}
-		log.Printf("[%s] reg %s=%g", r.ClientAddr, p.Name, p.Decode(raw))
-	}
-	return nil, nil
-}
-
-func (h *handler) HandleInputRegisters(r *modbus.InputRegistersRequest) ([]uint16, error) {
-	if err := h.checkUnit(r.UnitId); err != nil {
-		return nil, err
-	}
-	return h.readRegs(regmap.Input, r.Addr, r.Quantity), nil
-}
 
 func main() {
 	listen := flag.String("modbus", "tcp://0.0.0.0:5502", "Modbus TCP listen address (the real machine uses :502)")
@@ -135,7 +42,7 @@ func main() {
 
 	srv, err := modbus.NewServer(&modbus.ServerConfiguration{
 		URL: *listen, Timeout: 60 * time.Second, MaxClients: 8,
-	}, &handler{m: m, s: s})
+	}, sim.NewModbusHandler(m, s, slog.Default()))
 	if err != nil {
 		log.Fatal(err)
 	}
