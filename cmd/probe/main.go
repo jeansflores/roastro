@@ -9,6 +9,7 @@ package main
 
 import (
 	"encoding/csv"
+	"errors"
 	"flag"
 	"fmt"
 	"log"
@@ -26,6 +27,12 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		log.Fatal(err)
+	}
+}
+
+func run() error {
 	addr := flag.String("url", "tcp://127.0.0.1:5502", "PLC address (real machine: tcp://192.168.5.11:502)")
 	mapPath := flag.String("map", "configs/regmap.json", "register map")
 	every := flag.Duration("interval", time.Second, "polling interval")
@@ -36,31 +43,33 @@ func main() {
 
 	m, err := regmap.Load(*mapPath)
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if flag.Arg(0) == "set" && !isLocal(*addr) && !*allowWrite {
-		log.Fatal("write blocked: target is not localhost. Use --allow-write ONLY with someone standing next to the machine.")
+		return errors.New("write blocked: target is not localhost. Use --allow-write ONLY with someone standing next to the machine")
 	}
 	c, err := modbus.NewClient(&modbus.ClientConfiguration{URL: *addr, Timeout: 2 * time.Second})
 	if err != nil {
-		log.Fatal(err)
+		return err
 	}
 	if err := c.Open(); err != nil {
-		log.Fatalf("could not connect to %s: %v", *addr, err)
+		return fmt.Errorf("could not connect to %s: %w", *addr, err)
 	}
-	defer c.Close()
-	c.SetUnitId(m.UnitID)
+	defer func() { _ = c.Close() }()
+	if err := c.SetUnitId(m.UnitID); err != nil {
+		return err
+	}
 
 	if flag.Arg(0) == "set" {
 		for _, kv := range flag.Args()[1:] {
 			if err := write(c, m, kv); err != nil {
-				log.Fatalf("%s: %v", kv, err)
+				return fmt.Errorf("%s: %w", kv, err)
 			}
 			fmt.Println("ok", kv)
 		}
-		return
+		return nil
 	}
-	poll(c, m, *every, *csvPath, *scale)
+	return poll(c, m, *every, *csvPath, *scale)
 }
 
 func isLocal(u string) bool {
@@ -146,7 +155,7 @@ type sample struct {
 	bt float64
 }
 
-func poll(c *modbus.ModbusClient, m *regmap.Map, every time.Duration, csvPath string, scale float64) {
+func poll(c *modbus.ModbusClient, m *regmap.Map, every time.Duration, csvPath string, scale float64) error {
 	names := make([]string, 0, len(m.Points))
 	for _, p := range m.Points {
 		names = append(names, p.Name)
@@ -157,11 +166,13 @@ func poll(c *modbus.ModbusClient, m *regmap.Map, every time.Duration, csvPath st
 	if csvPath != "" {
 		f, err := os.Create(csvPath)
 		if err != nil {
-			log.Fatal(err)
+			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		cw = csv.NewWriter(f)
-		cw.Write(append([]string{"time", "ror_bt"}, names...))
+		if err := cw.Write(append([]string{"time", "ror_bt"}, names...)); err != nil {
+			return fmt.Errorf("csv: %w", err)
+		}
 	}
 
 	var hist []sample
@@ -197,8 +208,13 @@ func poll(c *modbus.ModbusClient, m *regmap.Map, every time.Duration, csvPath st
 			for _, n := range names {
 				row = append(row, strconv.FormatFloat(v[n], 'f', -1, 64))
 			}
-			cw.Write(row)
+			if err := cw.Write(row); err != nil {
+				return fmt.Errorf("csv: %w", err)
+			}
 			cw.Flush()
+			if err := cw.Error(); err != nil {
+				return fmt.Errorf("csv: %w", err)
+			}
 		}
 	}
 }

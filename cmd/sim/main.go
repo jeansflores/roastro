@@ -163,12 +163,14 @@ func main() {
 	mux := http.NewServeMux()
 	reply := func(w http.ResponseWriter, err error) {
 		w.Header().Set("Content-Type", "application/json")
+		var body any = s.Snapshot()
 		if err != nil {
 			w.WriteHeader(http.StatusBadRequest)
-			json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
-			return
+			body = map[string]string{"error": err.Error()}
 		}
-		json.NewEncoder(w).Encode(s.Snapshot())
+		if err := json.NewEncoder(w).Encode(body); err != nil {
+			log.Printf("http: encode response: %v", err)
+		}
 	}
 	num := func(r *http.Request, k string, def float64) float64 {
 		if v, err := strconv.ParseFloat(r.URL.Query().Get(k), 64); err == nil {
@@ -176,16 +178,16 @@ func main() {
 		}
 		return def
 	}
-	mux.HandleFunc("/state", func(w http.ResponseWriter, r *http.Request) { reply(w, nil) })
+	mux.HandleFunc("/state", func(w http.ResponseWriter, _ *http.Request) { reply(w, nil) })
 	mux.HandleFunc("/charge", func(w http.ResponseWriter, r *http.Request) {
 		reply(w, s.Charge(num(r, "kg", 5), num(r, "green", 25)))
 	})
-	mux.HandleFunc("/drop", func(w http.ResponseWriter, r *http.Request) { reply(w, s.Drop()) })
+	mux.HandleFunc("/drop", func(w http.ResponseWriter, _ *http.Request) { reply(w, s.Drop()) })
 	mux.HandleFunc("/preheat", func(w http.ResponseWriter, r *http.Request) {
 		s.Preheat(num(r, "temp", 200))
 		reply(w, nil)
 	})
-	mux.HandleFunc("/reset", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/reset", func(w http.ResponseWriter, _ *http.Request) {
 		ctl.Lock()
 		s.Reset()
 		if ap != nil {
@@ -203,8 +205,8 @@ func main() {
 		ctl.Unlock()
 		reply(w, nil)
 	})
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, "caloratto-sim: GET /state | /charge?kg=5 | /drop | /preheat?temp=200 | /reset | /fault?name=flame|emergency&on=1|0 | /speed?x=10")
+	mux.HandleFunc("/", func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = fmt.Fprintln(w, "caloratto-sim: GET /state | /charge?kg=5 | /drop | /preheat?temp=200 | /reset | /fault?name=flame|emergency&on=1|0 | /speed?x=10")
 	})
 	log.Printf("HTTP panel on http://localhost%s", *httpAddr)
 	log.Fatal(http.ListenAndServe(*httpAddr, mux))

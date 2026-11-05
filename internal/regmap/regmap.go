@@ -10,8 +10,10 @@ import (
 	"os"
 )
 
+// Kind is the Modbus data table a point lives in.
 type Kind string
 
+// Modbus data tables.
 const (
 	Holding  Kind = "holding"
 	Input    Kind = "input"
@@ -19,6 +21,7 @@ const (
 	Discrete Kind = "discrete"
 )
 
+// Point is one named quantity in the PLC and how to encode it.
 type Point struct {
 	Name     string  `json:"name"`
 	Kind     Kind    `json:"kind"`
@@ -30,6 +33,7 @@ type Point struct {
 	Desc     string  `json:"desc"`
 }
 
+// IsBool reports whether the point is a single bit (coil or discrete input).
 func (p Point) IsBool() bool { return p.Kind == Coil || p.Kind == Discrete }
 
 // Encode converts a physical value into a raw register value.
@@ -57,6 +61,7 @@ func (p Point) Decode(raw uint16) float64 {
 	return float64(raw) / s
 }
 
+// Map is a loaded register map, indexed by name and by address.
 type Map struct {
 	UnitID uint8   `json:"unit_id"`
 	Points []Point `json:"points"`
@@ -65,6 +70,7 @@ type Map struct {
 	byAddr map[Kind]map[uint16]Point
 }
 
+// Load reads and validates a register map from a JSON file.
 func Load(path string) (*Map, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -92,6 +98,14 @@ func Load(path string) (*Map, error) {
 	return &m, nil
 }
 
-func (m *Map) ByName(name string) (Point, bool) { p, ok := m.byName[name]; return p, ok }
+// ByName looks a point up by its name.
+func (m *Map) ByName(name string) (Point, bool) {
+	p, ok := m.byName[name]
+	return p, ok
+}
 
-func (m *Map) At(k Kind, addr uint16) (Point, bool) { p, ok := m.byAddr[k][addr]; return p, ok }
+// At looks a point up by its data table and address.
+func (m *Map) At(k Kind, addr uint16) (Point, bool) {
+	p, ok := m.byAddr[k][addr]
+	return p, ok
+}

@@ -38,14 +38,27 @@ func TestRoastLooksReal(t *testing.T) {
 	t.Logf("TP %.1f °C @ %.0fs, drop @ %.0fs", tp, tpT, dropAt)
 }
 
-func TestEmergencyCutsEverything(t *testing.T) {
+// firing returns a machine with the burner lit at 80% gas for 10 s.
+func firing(t *testing.T) *Sim {
+	t.Helper()
 	s := New(1)
 	for _, n := range []string{"drum_on", "fan_on", "burner"} {
-		s.Set(n, 1)
+		if err := s.Set(n, 1); err != nil {
+			t.Fatal(err)
+		}
 	}
-	s.Set("gas_cmd", 80)
+	if err := s.Set("gas_cmd", 80); err != nil {
+		t.Fatal(err)
+	}
 	s.Step(10)
-	s.SetFault("emergency", true)
+	return s
+}
+
+func TestEmergencyCutsEverything(t *testing.T) {
+	s := firing(t)
+	if err := s.SetFault("emergency", true); err != nil {
+		t.Fatal(err)
+	}
 	s.Step(5)
 	sn := s.Snapshot()
 	if sn.Burner || sn.FanOn || sn.DrumOn || sn.GasFb > 1 {
@@ -57,13 +70,10 @@ func TestEmergencyCutsEverything(t *testing.T) {
 }
 
 func TestFlameFaultClosesGas(t *testing.T) {
-	s := New(1)
-	for _, n := range []string{"drum_on", "fan_on", "burner"} {
-		s.Set(n, 1)
+	s := firing(t)
+	if err := s.SetFault("flame", true); err != nil {
+		t.Fatal(err)
 	}
-	s.Set("gas_cmd", 80)
-	s.Step(10)
-	s.SetFault("flame", true)
 	s.Step(10)
 	if s.Snapshot().GasFb > 1 {
 		t.Fatal("flame failure did not close the gas valve")

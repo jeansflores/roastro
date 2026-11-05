@@ -49,15 +49,20 @@ func interp(t [][2]float64, x float64) float64 {
 	return t[len(t)-1][1]
 }
 
+// AirflowM3h converts a fan setting in percent into airflow in m³/h.
 func AirflowM3h(pct float64) float64 { return interp(fanTable, pct) }
-func DrumRPM(pct float64) float64    { return interp(drumTable, pct) }
 
+// DrumRPM converts a drum setting in percent into drum rpm.
+func DrumRPM(pct float64) float64 { return interp(drumTable, pct) }
+
+// Event is something notable that happened inside the simulator, at simulated time T.
 type Event struct {
 	T    float64 `json:"t"`
 	Name string  `json:"name"`
 	Info string  `json:"info,omitempty"`
 }
 
+// Sim is the simulated roaster and its PLC. All methods are safe for concurrent use.
 type Sim struct {
 	mu sync.Mutex
 
@@ -83,6 +88,7 @@ type Sim struct {
 	rng    *rand.Rand
 }
 
+// New returns a cold machine. The seed drives the probe noise.
 func New(seed int64) *Sim {
 	s := &Sim{rng: rand.New(rand.NewSource(seed))}
 	s.reset()
@@ -94,6 +100,7 @@ func (s *Sim) reset() {
 		Drum: 80, Fan: 45, GasCmd: 0, RoastPoint: 210}
 }
 
+// Reset returns the machine to a cold, empty state.
 func (s *Sim) Reset() { s.mu.Lock(); defer s.mu.Unlock(); s.reset(); s.event("reset", "") }
 
 func (s *Sim) event(name, info string) {
@@ -179,7 +186,7 @@ func (s *Sim) step(dt float64) {
 			Qevap = math.Min(rate*latentJkg, 0.45*math.Max(Qb, 0))
 			s.waterKg = math.Max(0, s.waterKg-rate*dt)
 		}
-		Qexo = 50 * s.dryKg * math.Exp(-math.Pow((s.Tb-200)/9, 2))
+		Qexo = 50 * s.dryKg * math.Exp(-((s.Tb-200)/9)*((s.Tb-200)/9))
 		cb := s.dryKg*1300 + s.waterKg*4186
 		s.Tb += (Qb - Qevap + Qexo) / cb * dt
 		s.beanKg = s.dryKg + s.waterKg
@@ -211,6 +218,7 @@ func (s *Sim) step(dt float64) {
 	}
 }
 
+// Charge loads kg of green coffee at greenT °C into the drum.
 func (s *Sim) Charge(kg, greenT float64) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -230,6 +238,7 @@ func (s *Sim) Charge(kg, greenT float64) error {
 	return nil
 }
 
+// Drop empties the drum into the cooling tray.
 func (s *Sim) Drop() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -252,6 +261,7 @@ func (s *Sim) Preheat(t float64) {
 	s.event("preheat_shortcut", fmt.Sprintf("%.0f °C", t))
 }
 
+// SetFault turns an injectable fault ("emergency" or "flame") on or off.
 func (s *Sim) SetFault(name string, on bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -396,6 +406,7 @@ type Snapshot struct {
 	Events       []Event `json:"events"`
 }
 
+// Snapshot returns a consistent copy of the whole state.
 func (s *Sim) Snapshot() Snapshot {
 	s.mu.Lock()
 	defer s.mu.Unlock()
