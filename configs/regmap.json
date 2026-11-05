@@ -1,0 +1,26 @@
+{
+  "_note": "PROVISORIO. Enderecos inventados ate termos o .aset da Carmomaq. Troque so 'addr', 'scale' e 'kind'; os 'name' sao fixos (o simulador usa eles).",
+  "unit_id": 1,
+  "points": [
+    { "name": "bt",            "kind": "holding",  "addr": 0,  "scale": 10, "signed": true, "unit": "°C", "desc": "Temperatura do grão (AI1)" },
+    { "name": "et",            "kind": "holding",  "addr": 1,  "scale": 10, "signed": true, "unit": "°C", "desc": "Temperatura do ar/exaustão (AI2)" },
+    { "name": "gas_cmd",       "kind": "holding",  "addr": 2,  "scale": 1,  "writable": true, "unit": "%", "desc": "Potência do queimador comandada (AO1 0-10V)" },
+    { "name": "gas_fb",        "kind": "holding",  "addr": 3,  "scale": 1,  "unit": "%", "desc": "Feedback do servo da válvula de gás (AI3)" },
+    { "name": "drum",          "kind": "holding",  "addr": 4,  "scale": 1,  "writable": true, "unit": "%", "desc": "Velocidade do cilindro (INV1)" },
+    { "name": "fan",           "kind": "holding",  "addr": 5,  "scale": 1,  "writable": true, "unit": "%", "desc": "Velocidade do ventilador (INV2)" },
+    { "name": "roast_point",   "kind": "holding",  "addr": 6,  "scale": 10, "writable": true, "unit": "°C", "desc": "Ponto de torra (campainha)" },
+    { "name": "timer_s",       "kind": "holding",  "addr": 7,  "scale": 1,  "unit": "s", "desc": "Cronômetro do CLP" },
+
+    { "name": "burner",        "kind": "coil",     "addr": 0,  "writable": true, "desc": "Queimador liga/desliga" },
+    { "name": "drum_on",       "kind": "coil",     "addr": 1,  "writable": true, "desc": "Cilindro liga/desliga" },
+    { "name": "fan_on",        "kind": "coil",     "addr": 2,  "writable": true, "desc": "Ventilador liga/desliga" },
+    { "name": "stirrer",       "kind": "coil",     "addr": 3,  "writable": true, "desc": "Mexedor" },
+    { "name": "cooler",        "kind": "coil",     "addr": 4,  "writable": true, "desc": "Resfriador" },
+
+    { "name": "emergency",     "kind": "discrete", "addr": 0,  "desc": "Botão de emergência (D01)" },
+    { "name": "flame_fault",   "kind": "discrete", "addr": 1,  "desc": "Falta de chama (D02)" },
+    { "name": "hopper_sensor", "kind": "discrete", "addr": 2,  "desc": "Sensor da moega (D03)" },
+    { "name": "bell",          "kind": "discrete", "addr": 3,  "desc": "Campainha / ponto de torra atingido (D13)" },
+    { "name": "safety_trip",   "kind": "discrete", "addr": 4,  "desc": "Limite de segurança 280 °C atingido" }
+  ]
+}

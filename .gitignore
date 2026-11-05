@@ -1,0 +1,11 @@
+# Build output
+/bin/
+*.exe
+
+# Runtime artifacts
+*.log
+*.csv
+
+# Local-only source material (rewritten into docs/)
+*.zip
+contexto-*.txt
