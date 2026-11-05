@@ -1,4 +1,4 @@
-module github.com/jeansflores/project-c
+module github.com/jeansflores/roastro
 
 go 1.27
 

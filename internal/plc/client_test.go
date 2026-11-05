@@ -10,8 +10,8 @@ import (
 
 	"github.com/simonvetter/modbus"
 
-	"github.com/jeansflores/project-c/internal/regmap"
-	"github.com/jeansflores/project-c/internal/sim"
+	"github.com/jeansflores/roastro/internal/regmap"
+	"github.com/jeansflores/roastro/internal/sim"
 )
 
 func loadMap(t *testing.T) *regmap.Map {

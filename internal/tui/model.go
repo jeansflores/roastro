@@ -11,8 +11,8 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jeansflores/project-c/internal/plc"
-	"github.com/jeansflores/project-c/internal/roast"
+	"github.com/jeansflores/roastro/internal/plc"
+	"github.com/jeansflores/roastro/internal/roast"
 )
 
 // Writer sends a command to the PLC. *plc.Client implements it.

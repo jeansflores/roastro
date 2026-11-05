@@ -12,7 +12,7 @@ internal/<pkg>/      the real code; importable only from inside this module
 configs/             runtime data, not code
 ```
 
-- **`internal/` is enforced by the compiler.** Another module cannot import `github.com/jeansflores/project-c/internal/plc`. This lets us change APIs freely while the project is young.
+- **`internal/` is enforced by the compiler.** Another module cannot import `github.com/jeansflores/roastro/internal/plc`. This lets us change APIs freely while the project is young.
 - **`main` stays thin.** `cmd/monitor/main.go` parses flags, builds objects and connects them. No business logic, so everything interesting is testable without running a binary.
 - **Package names are short, lowercase nouns** that say what the package *provides*: `plc`, `roast`, `tui`. The caller reads `plc.NewClient`, `roast.NewRoR`, so names inside packages do not repeat the package (`plc.Client`, not `plc.PLCClient`).
 - **Dependencies point one way:** `tui → plc → regmap`, `tui → roast`, `tui → machine`, `sim → machine`. Nothing imports `tui`. When the monitor needed the rpm/m³/h tables, they moved from `sim` into `machine` rather than letting `tui` import the simulator (see commit `refactor: move the manual's conversion tables`).

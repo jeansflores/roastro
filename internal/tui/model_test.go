@@ -8,7 +8,7 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jeansflores/project-c/internal/plc"
+	"github.com/jeansflores/roastro/internal/plc"
 )
 
 type write struct {

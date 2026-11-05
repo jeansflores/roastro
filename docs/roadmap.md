@@ -40,6 +40,7 @@ The features are not a list; they feed each other. This came from the roaster wh
 
 ## Open questions
 
+- **Secure the name.** The product is called **Roastro** (roast + maestro: "conduct every roast"). Before investing in a brand, register a domain (`roastro.app`, `roastro.coffee` and `roastro.com.br` looked free on 2026-11-05; `roastro.com` is taken) and search INPI classes 9 and 42. Jean is aligning this with his partner first.
 - What does the built-in automation do, and what is missing? (for M7)
 - Which cupping protocol does the roaster use (SCA form, a simpler in-house sheet)? (for M6)
 - How are green coffee lots identified today (supplier, farm, lot code, bag weight)? (for M5)

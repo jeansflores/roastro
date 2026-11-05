@@ -17,9 +17,9 @@ import (
 
 	tea "charm.land/bubbletea/v2"
 
-	"github.com/jeansflores/project-c/internal/plc"
-	"github.com/jeansflores/project-c/internal/regmap"
-	"github.com/jeansflores/project-c/internal/tui"
+	"github.com/jeansflores/roastro/internal/plc"
+	"github.com/jeansflores/roastro/internal/regmap"
+	"github.com/jeansflores/roastro/internal/tui"
 )
 
 func main() {

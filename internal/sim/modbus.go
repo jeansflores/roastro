@@ -5,7 +5,7 @@ import (
 
 	"github.com/simonvetter/modbus"
 
-	"github.com/jeansflores/project-c/internal/regmap"
+	"github.com/jeansflores/roastro/internal/regmap"
 )
 
 // ModbusHandler serves a Sim over Modbus, translating register reads and

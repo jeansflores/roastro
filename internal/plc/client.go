@@ -12,7 +12,7 @@ import (
 
 	"github.com/simonvetter/modbus"
 
-	"github.com/jeansflores/project-c/internal/regmap"
+	"github.com/jeansflores/roastro/internal/regmap"
 )
 
 // ErrWriteBlocked is returned by Client.Write when the target is not a

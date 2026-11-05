@@ -33,4 +33,4 @@ formatters:
   settings:
     goimports:
       local-prefixes:
-        - github.com/jeansflores/project-c
+        - github.com/jeansflores/roastro

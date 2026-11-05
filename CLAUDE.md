@@ -1,4 +1,4 @@
-# project-c
+# Roastro
 
 Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. Go backend and tools now; a TS/React frontend will live in `web/`. Background, machine facts and decisions: `docs/context.md`. Milestones and feature plan: `docs/roadmap.md`. Primary sources (manual, electrical schematic): `docs/reference/`.
 
@@ -42,7 +42,7 @@ Run binaries from the repo root: the default `--map` path is `configs/regmap.jso
 
 ### Issue tracker
 
-Issues live in GitHub Issues on jeansflores/project-c (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
+Issues live in GitHub Issues on jeansflores/roastro (via the `gh` CLI). See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 

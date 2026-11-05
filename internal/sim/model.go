@@ -10,7 +10,7 @@ import (
 	"math/rand"
 	"sync"
 
-	"github.com/jeansflores/project-c/internal/machine"
+	"github.com/jeansflores/roastro/internal/machine"
 )
 
 const (

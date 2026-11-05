@@ -19,9 +19,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/jeansflores/project-c/internal/plc"
-	"github.com/jeansflores/project-c/internal/regmap"
-	"github.com/jeansflores/project-c/internal/roast"
+	"github.com/jeansflores/roastro/internal/plc"
+	"github.com/jeansflores/roastro/internal/regmap"
+	"github.com/jeansflores/roastro/internal/roast"
 )
 
 func main() {

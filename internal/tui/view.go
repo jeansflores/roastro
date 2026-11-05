@@ -8,7 +8,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 
-	"github.com/jeansflores/project-c/internal/machine"
+	"github.com/jeansflores/roastro/internal/machine"
 )
 
 // ANSI colors follow the terminal's own palette, so the dashboard looks
@@ -47,7 +47,7 @@ func (m Model) View() tea.View {
 
 	v := tea.NewView(strings.Join([]string{m.headerView(), body, m.status, m.helpView()}, "\n"))
 	v.AltScreen = true
-	v.WindowTitle = "project-c monitor"
+	v.WindowTitle = "roastro monitor"
 	return v
 }
 
@@ -63,7 +63,7 @@ func (m Model) headerView() string {
 	if m.cfg.CanWrite {
 		writes = notice.Render("writes enabled")
 	}
-	return fmt.Sprintf("%s  %s  %s  %s", title.Render("project-c monitor"), m.cfg.Target, conn, writes)
+	return fmt.Sprintf("%s  %s  %s  %s", title.Render("roastro monitor"), m.cfg.Target, conn, writes)
 }
 
 func (m Model) roastView() string {

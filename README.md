@@ -1,4 +1,4 @@
-# project-c
+# Roastro
 
 Roasting software for a **Carmomaq Caloratto 5 kg** coffee roaster, which talks **Modbus TCP**. The app is in its early days: this repository holds a PLC simulator, a terminal monitor that proves the Modbus link end to end, and a minimal line-based client. Background and decisions: [`docs/context.md`](docs/context.md). Roadmap: [`docs/roadmap.md`](docs/roadmap.md). Learning notes: [`docs/study-guide.md`](docs/study-guide.md).
 
@@ -25,7 +25,7 @@ make help        # everything else
 ### Monitor
 
 ```
-project-c monitor  tcp://127.0.0.1:5502  ● CONNECTED  writes enabled
+roastro monitor  tcp://127.0.0.1:5502  ● CONNECTED  writes enabled
 ╭──────────────────────────────────────────╮ ╭──────────────────────────────────────────╮
 │ Roast                                    │ │ Link                                     │
 │                                          │ │                                          │
