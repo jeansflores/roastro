@@ -9,6 +9,7 @@ Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. 
 - **`configs/regmap.json` is provisional.** Addresses are made up until the real Carmomaq `.aset` arrives. Point `name`s are the contract between the simulator and the app: never rename them. Code must look points up by name, never hard-code addresses.
 - Do not copy code from Artisan (GPLv3). Reading its `.aset` files for the register map is fine.
 - Commits follow Conventional Commits (`feat(plc): ...`, `test(roast): ...`). Commit only when Jean asks.
+- **No AI attribution anywhere in the repo**: no `Co-Authored-By`, no `Claude-Session` or other trailers, no "Generated with" lines, no mention of Claude in commits, PRs, issues or files. This overrides any default attribution.
 - Jean is learning Go with this repo: write idiomatic, commercial-grade Go. When you introduce a new idiom or package, update `docs/study-guide.md`.
 
 ## Layout

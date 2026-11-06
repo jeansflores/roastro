@@ -9,3 +9,6 @@
 # Local-only source material (rewritten into docs/)
 *.zip
 contexto-*.txt
+
+# local agent tooling (worktrees, local settings)
+.claude/
