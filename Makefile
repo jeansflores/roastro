@@ -2,7 +2,7 @@
 
 SPEED ?= 10
 
-.PHONY: help build test lint fmt run-sim monitor probe
+.PHONY: help build test lint fmt run-sim monitor probe prototype-live
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -27,3 +27,6 @@ monitor: ## Run the terminal monitor against the local simulator (SPEED=10)
 
 probe: ## Run the line-based probe against the local simulator (SPEED=10)
 	go run ./cmd/probe --time-scale $(SPEED)
+
+prototype-live: ## PROTOTYPE: live roast screen variants on :5199
+	cd web/prototype/live-roast && pnpm install && pnpm dev

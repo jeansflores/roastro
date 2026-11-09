@@ -1,0 +1,32 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Space Grotesk", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "Space Mono", ui-monospace, monospace;
+  --color-bg: #0b0c0e;
+  --color-panel: #121317;
+  --color-panel-2: #181a1f;
+  --color-line: rgb(255 255 255 / 0.08);
+  --color-accent: #f5a524;
+  --color-bt: #f5a524;
+  --color-et: #7aa2f7;
+  --color-ror: #2dd4bf;
+  --color-gas: #c084fc;
+  --color-air: #a3e635;
+  --color-danger: #ef4444;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+body {
+  background: var(--color-bg);
+  color: white;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+.tnum {
+  font-variant-numeric: tabular-nums;
+}
