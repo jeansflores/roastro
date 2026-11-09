@@ -22,6 +22,18 @@ _Avoid_: Unfinished, broken roast
 A roast the operator rejects (a false charge, a test); hidden from the history but never erased.
 _Avoid_: Deleted roast
 
+**Reference roast**:
+A past roast chosen to be drawn behind another roast, live or in the history, as the curve to match; usually the best roast of that coffee.
+_Avoid_: Background curve, template, profile (a profile is more than a reference)
+
+**Coffee**:
+A green coffee as the roaster names it (e.g. "Bourbon Amarelo – Fazenda X"); a roast names the coffee it roasted (filled in before charge or afterwards), and the history is filtered by it.
+_Avoid_: Bean, product, lot (a lot is one purchase of a coffee)
+
+**Roast note**:
+A free-text comment the operator attaches to an instant of the roast clock (a smell, a color, an observation).
+_Avoid_: Annotation, comment, mark
+
 ### Roast events
 
 **Roast event**:
@@ -37,11 +49,11 @@ The lowest bean temperature after charge, where the probe stops falling and star
 _Avoid_: Bottom, TP (in prose)
 
 **Dry end**:
-The moment the beans finish drying and turn yellow; judged by eye.
-_Avoid_: Yellowing, end of drying
+The moment the beans change color (turn yellow), ending the drying phase and starting the Maillard phase; judged by eye.
+_Avoid_: Yellowing, end of drying, "Maillard" (that is the phase it starts)
 
 **First crack**:
-The start of the first audible cracking of the beans.
+The first audible pops of the beans; marked at the very first pops, not once cracking is under way.
 _Avoid_: FC (in prose), crack
 
 **Second crack**:
@@ -51,3 +63,21 @@ _Avoid_: SC (in prose)
 **Drop**:
 The moment roasted coffee leaves the drum for the cooling tray; the end of the roast.
 _Avoid_: Discharge, dump, end
+
+### Roast phases
+
+**Drying phase**:
+The part of a roast from charge to dry end.
+_Avoid_: Drying stage
+
+**Maillard phase**:
+The part of a roast from dry end to first crack, while the beans brown.
+_Avoid_: Browning phase, Maillard reaction (in this sense)
+
+**Development phase**:
+The part of a roast from first crack to drop.
+_Avoid_: Development stage, post-crack
+
+**Development time ratio**:
+The development phase's share of the whole roast time, as a percentage.
+_Avoid_: DTR (in prose), development percentage

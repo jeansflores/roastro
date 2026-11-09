@@ -24,8 +24,8 @@ The features are not a list; they feed each other. This came from the roaster wh
 | **M0** | Link proven | Simulator, `probe`, terminal `monitor`; reads, writes and reconnection validated | ✅ done |
 | **M1** | Real machine, read-only | Real register map from the Carmomaq `.aset`; values match the machine's own panel | yes: blocked on the `.aset` |
 | **M2** | Record roasts | Every roast saved (SQLite): curve, events (charge, TP, dry end, first crack, drop), green/roasted weight, notes | no |
-| **M3** | UI: live + history | Web UI served by the Go backend: live roast screen, roast library, curves compared side by side | no |
-| **M4** | Profiles | Recipes per bean and roast level; reference curve in the background; live deviation from it | no |
+| **M3** | UI: live + history | Web UI served by the Go backend: live roast screen with a reference roast drawn behind it, roast library, curves compared side by side | no |
+| **M4** | Profiles | Named recipes per coffee and roast level; live deviation alerts; auto-marking events by temperature | no |
 | **M5** | Inventory | Green coffee lots in; stock deducted automatically per batch from the charge weight | no |
 | **M6** | Cupping | Tasting scores and notes attached to a roast, opening its curve | no |
 | **M7** | Automation | The app follows a profile and adjusts gas and air by itself | yes, and it is the riskiest step |
@@ -40,6 +40,7 @@ The features are not a list; they feed each other. This came from the roaster wh
 
 ## Open questions
 
+- **Call with the roaster about interventions per phase.** He adjusts gas and air within the windows of three chemical reactions in three stages and prefers to explain it live. Feeds M4 (profiles) and M7 (automation).
 - **Secure the name.** The product is called **Roastro** (roast + maestro: "conduct every roast"). Before investing in a brand, register a domain (`roastro.app`, `roastro.coffee` and `roastro.com.br` looked free on 2026-11-05; `roastro.com` is taken) and search INPI classes 9 and 42. Jean is aligning this with his partner first.
 - What does the built-in automation do, and what is missing? (for M7)
 - Which cupping protocol does the roaster use (SCA form, a simpler in-house sheet)? (for M6)
