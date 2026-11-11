@@ -10,11 +10,14 @@ help: ## Show this help
 build: ## Build all binaries into ./bin
 	go build -o bin/ ./cmd/...
 
-test: ## Run all tests with the race detector
+test: ## Run all Go (race detector) and Rust tests
 	go test -race ./...
+	cargo test --workspace
 
-lint: ## Run golangci-lint
+lint: ## Run golangci-lint, rustfmt and clippy
 	golangci-lint run
+	cargo fmt --all --check
+	cargo clippy --workspace --all-targets -- -D warnings
 
 fmt: ## Format code
 	golangci-lint fmt

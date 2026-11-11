@@ -12,3 +12,6 @@ contexto-*.txt
 
 # local agent tooling (worktrees, local settings)
 .claude/
+
+# Rust build output
+/target/

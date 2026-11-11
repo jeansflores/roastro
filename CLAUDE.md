@@ -14,6 +14,12 @@ Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. 
 
 ## Layout
 
+Rust (Cargo workspace at the root):
+
+```
+crates/roast     pure roast calculations (RoR, ...)
+```
+
 Go code, to be replaced by Rust (ADR 0002):
 
 ```
@@ -23,7 +29,7 @@ cmd/monitor    terminal dashboard (Bubble Tea) with live readings and keyboard c
 internal/regmap  register map loading, encode/decode
 internal/sim     thermal model, PLC state, interlocks, autopilot
 internal/plc     Modbus client: read/write by point name, reconnect with backoff
-internal/roast   pure roast calculations (RoR, ...)
+internal/roast   pure roast calculations (ported to crates/roast; kept until probe and monitor move)
 internal/tui     Bubble Tea model/view for cmd/monitor
 configs/       runtime config (register map)
 docs/          context, roadmap, ADRs, reference PDFs
@@ -32,8 +38,8 @@ docs/          context, roadmap, ADRs, reference PDFs
 ## Commands
 
 ```bash
-make test       # go test -race ./...
-make lint       # golangci-lint run (config in .golangci.yml)
+make test       # go test -race ./... and cargo test --workspace
+make lint       # golangci-lint, cargo fmt --check, cargo clippy -D warnings
 make run-sim    # simulator with autopilot, SPEED=10
 make monitor    # terminal monitor against the local simulator, SPEED=10
 make probe      # line-based probe, SPEED=10
