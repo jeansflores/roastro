@@ -9,7 +9,7 @@ Written on 2026-11-04 from an earlier claude.ai conversation, to continue the wo
 
 Jean owns a Carmomaq Caloratto (5 kg) coffee roaster. He used Cropster (paid; the subscription lapsed) and knows Artisan (open source, Python, GPLv3). The goal is our own software to monitor and control the machine, with the charts and settings Artisan lacks.
 
-- Stack: Go backend (Modbus polling, persistence) and a TypeScript/React frontend, shipped as one Go binary that serves the UI on localhost (no internet needed). A desktop wrapper (Wails) may come later; Electron is ruled out. Main target: Windows.
+- Stack: Rust backend (Modbus polling, persistence) and a TypeScript/React frontend, shipped as one binary that serves the UI on localhost (no internet needed); the first tools were written in Go and are being rewritten (ADR 0002). A desktop wrapper (Tauri) may come later; Electron is ruled out. Main target: Windows.
 - Visual reference: perssua.com (desktop app with its own window, dark and clean). Roast screen: the chart dominates, big numbers on the side.
 - Jean is travelling. Development happens against the simulator. At times a colleague will be at the roastery and can connect the real machine for tests.
 

@@ -1,6 +1,6 @@
 # Roastro
 
-Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. Go backend and tools now; a TS/React frontend will live in `web/`. Background, machine facts and decisions: `docs/context.md`. Milestones and feature plan: `docs/roadmap.md`. Primary sources (manual, electrical schematic): `docs/reference/`.
+Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. Rust backend (being rewritten from Go, see `docs/adr/0002-rewrite-in-rust.md`); a TS/React frontend will live in `web/`. Background, machine facts and decisions: `docs/context.md`. Milestones and feature plan: `docs/roadmap.md`. Primary sources (manual, electrical schematic): `docs/reference/`.
 
 ## Rules
 
@@ -10,9 +10,11 @@ Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. 
 - Do not copy code from Artisan (GPLv3). Reading its `.aset` files for the register map is fine.
 - Commits follow Conventional Commits (`feat(plc): ...`, `test(roast): ...`). Commit only when Jean asks.
 - **No AI attribution anywhere in the repo**: no `Co-Authored-By`, no `Claude-Session` or other trailers, no "Generated with" lines, no mention of Claude in commits, PRs, issues or files. This overrides any default attribution.
-- Jean is learning Go with this repo: write idiomatic, commercial-grade Go. When you introduce a new idiom or package, update `docs/study-guide.md`.
+- Write idiomatic, commercial-grade code. New code is Rust; the Go code is only kept running until its Rust counterpart replaces it (ADR 0002), so do not grow it.
 
 ## Layout
+
+Go code, to be replaced by Rust (ADR 0002):
 
 ```
 cmd/sim        PLC simulator: Modbus TCP :5502 + HTTP control panel :8080
@@ -24,7 +26,7 @@ internal/plc     Modbus client: read/write by point name, reconnect with backoff
 internal/roast   pure roast calculations (RoR, ...)
 internal/tui     Bubble Tea model/view for cmd/monitor
 configs/       runtime config (register map)
-docs/          context, roadmap, study guide, reference PDFs
+docs/          context, roadmap, ADRs, reference PDFs
 ```
 
 ## Commands
