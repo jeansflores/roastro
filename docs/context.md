@@ -9,7 +9,7 @@ Written on 2026-11-04 from an earlier claude.ai conversation, to continue the wo
 
 Jean owns a Carmomaq Caloratto (5 kg) coffee roaster. He used Cropster (paid; the subscription lapsed) and knows Artisan (open source, Python, GPLv3). The goal is our own software to monitor and control the machine, with the charts and settings Artisan lacks.
 
-- Stack: Rust backend (Modbus polling, persistence) and a TypeScript/React frontend, shipped as one binary that serves the UI on localhost (no internet needed); the first tools were written in Go and are being rewritten (ADR 0002). A desktop wrapper (Tauri) may come later; Electron is ruled out. Main target: Windows.
+- Stack: Rust backend (Modbus polling, persistence) and a TypeScript/React frontend, shipped as one binary that serves the UI on localhost (no internet needed); the first tools were written in Go and rewritten in Rust (ADR 0002). A desktop wrapper (Tauri) may come later; Electron is ruled out. Main target: Windows.
 - Visual reference: perssua.com (desktop app with its own window, dark and clean). Roast screen: the chart dominates, big numbers on the side.
 - Jean is travelling. Development happens against the simulator. At times a colleague will be at the roastery and can connect the real machine for tests.
 
@@ -94,7 +94,7 @@ Specifications:
 
 ## 5. What exists so far
 
-A PLC simulator and a probe client, described in the [README](../README.md). Rust crates: `tokio-modbus` (Modbus TCP server and client); the remaining Go monitor uses `github.com/simonvetter/modbus`.
+A PLC simulator and a probe client, described in the [README](../README.md). Modbus TCP server and client: `tokio-modbus`.
 
 Two channels in the simulator:
 
@@ -131,7 +131,7 @@ Lumped parameters, tuned to look real:
 
 Agreed:
 
-- Start the app on top of the simulator. First milestone: a terminal monitor (`cmd/monitor`) proving that the Modbus link works end to end, including reconnection and writes.
+- Start the app on top of the simulator. First milestone: a terminal monitor (`crates/monitor`) proving that the Modbus link works end to end, including reconnection and writes.
 
 Proposed, not yet decided:
 
@@ -142,7 +142,7 @@ Proposed, not yet decided:
 
 Ideas for the app:
 
-1. Go backend: 1 Hz polling, time series in SQLite, automatic reconnection, events (charge, TP, DE, first crack, drop), both manual and auto-detected.
+1. Rust backend: 1 Hz polling, time series in SQLite, automatic reconnection, events (charge, TP, DE, first crack, drop), both manual and auto-detected.
 2. Calculations: RoR (configurable window, smoothing), phases (drying, Maillard, development), DTR, background reference curve, comparing roasts.
 3. Show rpm and m³/h next to % (table above).
 4. TS frontend: live roast screen, history, profiles.

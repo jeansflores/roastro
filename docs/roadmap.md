@@ -24,7 +24,7 @@ The features are not a list; they feed each other. This came from the roaster wh
 | **M0** | Link proven | Simulator, `probe`, terminal `monitor`; reads, writes and reconnection validated | ✅ done |
 | **M1** | Real machine, read-only | Real register map from the Carmomaq `.aset`; values match the machine's own panel | yes: blocked on the `.aset` |
 | **M2** | Record roasts | Every roast saved (SQLite): curve, events (charge, TP, dry end, first crack, drop), green/roasted weight, notes | no |
-| **M3** | UI: live + history | Web UI served by the Go backend: live roast screen with a reference roast drawn behind it, roast library, curves compared side by side | no |
+| **M3** | UI: live + history | Web UI served by the Rust backend: live roast screen with a reference roast drawn behind it, roast library, curves compared side by side | no |
 | **M4** | Profiles | Named recipes per coffee and roast level; live deviation alerts; auto-marking events by temperature | no |
 | **M5** | Inventory | Green coffee lots in; stock deducted automatically per batch from the charge weight | no |
 | **M6** | Cupping | Tasting scores and notes attached to a roast, opening its curve | no |

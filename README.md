@@ -2,19 +2,19 @@
 
 Roasting software for a **Carmomaq Caloratto 5 kg** coffee roaster, which talks **Modbus TCP**. The app is in its early days: this repository holds a PLC simulator, a terminal monitor that proves the Modbus link end to end, and a minimal line-based client. Background and decisions: [`docs/context.md`](docs/context.md). Roadmap: [`docs/roadmap.md`](docs/roadmap.md).
 
-The code is being rewritten from Go to Rust ([ADR 0002](docs/adr/0002-rewrite-in-rust.md)); the Go tools below keep working until their Rust versions replace them.
+Written in Rust ([ADR 0002](docs/adr/0002-rewrite-in-rust.md)).
 
 | Command | What it is |
 |---|---|
-| `crates/sim` (Rust) | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
-| `cmd/monitor` | Live terminal dashboard: roast values, link health, keyboard commands, automatic reconnection |
-| `crates/probe` (Rust) | One line per reading, optional CSV, one-off writes |
+| `crates/sim` | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
+| `crates/monitor` | Live terminal dashboard: roast values, link health, keyboard commands, automatic reconnection |
+| `crates/probe` | One line per reading, optional CSV, one-off writes |
 
 All three behave the same against the simulator and the real machine.
 
 ## Run
 
-Requires Rust 1.87 and Go 1.27 (for `monitor` until it is ported). Run from the repository root.
+Requires Rust 1.87. Run from the repository root.
 
 ```bash
 make run-sim     # simulator with the autopilot, 10x faster (SPEED=10)
@@ -102,4 +102,4 @@ What is not exact:
 - Weight loss stays around 9%; real roasts lose 12–15%, because the model has no organic loss.
 - The numbers are good for developing the UI and algorithms, not for predicting a roast.
 
-`go test ./...` checks that the curve stays plausible (turning point range and duration) and that the interlocks work.
+`make test` checks that the curve stays plausible (turning point range and duration) and that the interlocks work.
