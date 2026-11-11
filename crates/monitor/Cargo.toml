@@ -1,0 +1,22 @@
+[package]
+name = "monitor"
+version = "0.1.0"
+description = "Live terminal dashboard for the roaster PLC: roast values, link health, keyboard commands."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+machine = { path = "../machine" }
+plc = { path = "../plc" }
+ratatui.workspace = true
+regmap = { path = "../regmap" }
+roast = { path = "../roast" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "sync", "time"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
