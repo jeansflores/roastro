@@ -94,7 +94,7 @@ Specifications:
 
 ## 5. What exists so far
 
-A PLC simulator and a probe client, described in the [README](../README.md). Dependency: `github.com/simonvetter/modbus` (Modbus TCP/RTU server and client).
+A PLC simulator and a probe client, described in the [README](../README.md). Rust crates: `tokio-modbus` (Modbus TCP server and client); the remaining Go monitor uses `github.com/simonvetter/modbus`.
 
 Two channels in the simulator:
 
