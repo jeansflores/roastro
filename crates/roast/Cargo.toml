@@ -1,0 +1,10 @@
+[package]
+name = "roast"
+version = "0.1.0"
+description = "Pure roast calculations: no I/O, no wall clock."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[lints]
+workspace = true
