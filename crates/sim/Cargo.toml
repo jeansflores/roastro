@@ -1,0 +1,24 @@
+[package]
+name = "sim"
+version = "0.1.0"
+description = "Pretends to be the Caloratto PLC: thermal model, interlocks and autopilot over Modbus TCP."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+axum.workspace = true
+clap.workspace = true
+machine = { path = "../machine" }
+regmap = { path = "../regmap" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "net", "time", "signal", "sync"] }
+tokio-modbus = { workspace = true, features = ["tcp-server"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true
