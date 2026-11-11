@@ -1,7 +1,9 @@
 // PROTOTYPE, throwaway. Thin React wrapper around uPlot: builds the plot once,
 // pushes new data on every render, and redraws overlays (events, notes, phase
-// bands) from a ref so the plot never has to be rebuilt.
-import { useEffect, useRef } from 'react'
+// bands) from a ref so the plot never has to be rebuilt. An optional hover
+// card follows the cursor, rendered in a portal so only it re-renders.
+import { useEffect, useRef, useState, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import uPlot from 'uplot'
 
 export const C = {
@@ -36,6 +38,7 @@ export function Chart<O>({
   overlay,
   draw,
   onClick,
+  tooltip,
   className,
 }: {
   options: () => Options
@@ -43,17 +46,20 @@ export function Chart<O>({
   overlay: O
   draw?: (u: uPlot, overlay: O) => void
   onClick?: (c: ChartClick) => void
+  tooltip?: (idx: number) => ReactNode // content of the hover card for data index idx
   className?: string
 }) {
   const box = useRef<HTMLDivElement>(null)
   const plot = useRef<uPlot | null>(null)
-  const latest = useRef({ overlay, draw, onClick })
-  latest.current = { overlay, draw, onClick }
+  const latest = useRef({ overlay, draw, onClick, tooltip })
+  latest.current = { overlay, draw, onClick, tooltip }
+  const [hover, setHover] = useState<{ idx: number; x: number; y: number } | null>(null)
 
   useEffect(() => {
     const el = box.current!
     const o = options()
     const yScale = Object.keys(o.scales ?? {}).find((k) => k !== 'x') ?? 'y'
+    let pointerIn = false
     const u = new uPlot(
       {
         ...o,
@@ -61,12 +67,26 @@ export function Chart<O>({
         hooks: {
           ...o.hooks,
           draw: [(u) => latest.current.draw?.(u, latest.current.overlay)],
+          setCursor: [
+            (u) => {
+              // Synced charts move their cursor too; only the one under the mouse shows a card.
+              const { idx, left, top } = u.cursor
+              if (!latest.current.tooltip || !pointerIn || idx == null || left == null || left < 0) return setHover(null)
+              const r = u.over.getBoundingClientRect()
+              setHover({ idx, x: r.left + left, y: r.top + (top ?? 0) })
+            },
+          ],
         },
       },
       data,
       el,
     )
     u.over.style.cursor = 'crosshair'
+    u.over.addEventListener('mouseenter', () => (pointerIn = true))
+    u.over.addEventListener('mouseleave', () => {
+      pointerIn = false
+      setHover(null)
+    })
     u.over.addEventListener('click', (e) => {
       latest.current.onClick?.({
         t: Math.round(u.posToVal(e.offsetX, 'x')),
@@ -89,9 +109,26 @@ export function Chart<O>({
   useEffect(() => {
     // Scales have fixed ranges, so a full setData only redraws.
     plot.current?.setData(data)
-  })
+  }, [data])
 
-  return <div ref={box} className={className} />
+  const card = hover && tooltip ? tooltip(hover.idx) : null
+  return (
+    <div ref={box} className={className}>
+      {card &&
+        createPortal(
+          <div
+            className="pointer-events-none fixed z-30 rounded-xl border border-white/10 bg-panel-2/95 p-3 shadow-2xl shadow-black/60 backdrop-blur"
+            style={{
+              left: hover!.x > innerWidth - 300 ? hover!.x - 276 : hover!.x + 16,
+              top: Math.min(hover!.y + 16, innerHeight - 220),
+            }}
+          >
+            {card}
+          </div>,
+          document.body,
+        )}
+    </div>
+  )
 }
 
 function contentSize(el: HTMLElement) {

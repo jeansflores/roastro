@@ -24,6 +24,9 @@ from the repo root). Nothing is persisted and nothing talks to a PLC.
 make prototype-live     # from the repo root, then open http://localhost:5199
 ```
 
+To show the chosen screen to someone, open `http://localhost:5199/?demo=1`:
+only variant D.
+
 The white bar at the bottom is scaffolding, not design: ← / → switch variants,
 space pauses, speed buttons, and "Jump to…" skips to preheat, first crack, after
 drop and so on (jumping forward pretends Dry end and First crack were marked).

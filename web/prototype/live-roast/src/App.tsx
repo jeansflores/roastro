@@ -16,8 +16,12 @@ const VARIANTS = [
   { key: 'D', name: 'Cockpit + timeline', C: VariantD },
 ]
 
+// ?demo=1 is for showing the chosen screen to someone: only variant D.
+const DEMO = new URLSearchParams(location.search).get('demo') === '1'
+const SHOWN = DEMO ? VARIANTS.filter((v) => v.key === 'D') : VARIANTS
+
 export function App() {
-  const [variant, setVariant] = useState(() => new URLSearchParams(location.search).get('variant') ?? 'A')
+  const [variant, setVariant] = useState(() => (DEMO ? 'D' : (new URLSearchParams(location.search).get('variant') ?? 'A')))
   const s = useRoastSession()
   const change = (key: string) => {
     const url = new URL(location.href)
@@ -25,11 +29,11 @@ export function App() {
     history.replaceState(null, '', url)
     setVariant(key)
   }
-  const V = (VARIANTS.find((v) => v.key === variant) ?? VARIANTS[0]).C
+  const V = (SHOWN.find((v) => v.key === variant) ?? SHOWN[0]).C
   return (
     <>
       <V key={variant} s={s} />
-      <PrototypeSwitcher variants={VARIANTS} current={variant} onChange={change} s={s} />
+      <PrototypeSwitcher variants={SHOWN} current={variant} onChange={change} s={s} />
     </>
   )
 }

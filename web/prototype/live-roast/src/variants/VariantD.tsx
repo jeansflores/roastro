@@ -3,9 +3,9 @@
 // timeline in the rail instead of A's event list. One "Big numbers" toggle
 // moves only the readouts into variant B's top strip; marking stays the same.
 import { useEffect, useRef, useState } from 'react'
-import { C, Chart } from '../chart/Chart'
-import { EVENT_HINT, EVENT_KEY, EVENT_LABEL, MARKABLE, fmt1, fmtClock, liveAt, type EventKind } from '../lib/roast'
-import { columns, type Session } from '../lib/session'
+import { C, Chart, fade } from '../chart/Chart'
+import { EVENT_HINT, EVENT_KEY, EVENT_LABEL, MARKABLE, fmt1, fmtClock, fmtDelta, liveAt, type EventKind } from '../lib/roast'
+import { columns, type Columns, type Session } from '../lib/session'
 import { Button, Kbd, Label, NextRoastFields, RoastedWeightField, StatusChip, cn, useHotkeys } from '../ui'
 import { ClickMenu, Legend, Phases, Readout, Readouts, drawMain, drawStrip, mainOptions, stripOptions } from './VariantA'
 import { NumberStrip, SummaryStrip } from './VariantB'
@@ -63,17 +63,25 @@ export function VariantD({ s }: { s: Session }) {
           <Legend s={s} />
           <Chart
             className="min-h-0 flex-1 px-2"
-            options={mainOptions}
+            options={mainWithPoints}
             data={[c.x, c.bt, c.et, c.ror, c.refBt, c.refEt, c.refRor]}
             overlay={overlay}
             draw={drawMain}
             onClick={(k) => s.status !== 'waiting' && setMenu(k)}
+            tooltip={(i) => <HoverCard s={s} c={c} i={i} />}
           />
           <div className="flex items-center gap-4 px-6 pt-2 text-[11px] text-white/45">
             <span className="text-gas">■ Gas %</span>
             <span className="text-air">■ Air %</span>
           </div>
-          <Chart className="h-[16%] min-h-24 px-2" options={stripOptions} data={[c.x, c.gas, c.fan]} overlay={overlay} draw={drawStrip} />
+          <Chart
+            className="h-[16%] min-h-24 px-2"
+            options={stripWithPoints}
+            data={[c.x, c.gas, c.fan]}
+            overlay={overlay}
+            draw={drawStrip}
+            tooltip={(i) => <HoverCard s={s} c={c} i={i} />}
+          />
         </main>
 
         <aside className="flex min-h-0 flex-col border-l border-line bg-panel">
@@ -134,6 +142,87 @@ function RailSummary({ s }: { s: Session }) {
       <Readout label="Development" value={fc ? fmtClock(s.roastEnd - fc.t) : '—'} size="lg" />
       <Readout label="Drop BT" value={fmt1(drop ? liveAt(drop.t)?.[1] : undefined)} unit="°C" color={C.bt} />
       <Readout label="Weight loss" value={s.weightLoss !== undefined ? s.weightLoss.toFixed(1) : '—'} unit="%" />
+    </div>
+  )
+}
+
+// A's chart options plus dots on each curve under the cursor.
+const withPoints = (build: () => ReturnType<typeof mainOptions> | ReturnType<typeof stripOptions>) => () => {
+  const o = build()
+  return { ...o, cursor: { ...o.cursor, points: { size: 9, width: 2, fill: '#0b0c0e' } } }
+}
+const mainWithPoints = withPoints(mainOptions)
+const stripWithPoints = withPoints(stripOptions)
+
+// What the hover card shows at one instant: live values, the reference's
+// values and the difference, and any event or note right there.
+function HoverCard({ s, c, i }: { s: Session; c: Columns; i: number }) {
+  const x = c.x[i]
+  const live = c.bt[i] !== null
+  const ref = c.refBt[i] !== null
+  if (!live && !ref) return null
+  const t = s.status === 'waiting' ? x + s.now : x
+  const isNow = live && t === s.now
+  const here = s.status === 'waiting' ? [] : s.events.filter((e) => Math.abs(e.t - x) <= 2)
+  const notes = s.status === 'waiting' ? [] : s.notes.filter((n) => Math.abs(n.t - x) <= 3)
+  const row = (label: string, color: string, v: number | null, r: number | null, unit = '') =>
+    !live ? (
+      <div className="contents">
+        <span className="text-white/50">{label}</span>
+        <span className="col-span-3 text-right font-bold" style={{ color: fade(color, 0.7) }}>
+          {r !== null ? `${fmt1(r)}${unit}` : '—'}
+        </span>
+      </div>
+    ) : (
+    <div className="contents">
+      <span className="text-white/50">{label}</span>
+      <span className="text-right font-bold" style={{ color }}>
+        {v !== null ? `${fmt1(v)}${unit}` : '—'}
+      </span>
+      <span className="text-right text-white/40">{r !== null ? fmt1(r) : ''}</span>
+      <span className="text-right text-white/60">{v !== null && r !== null ? fmtDelta(v - r) : ''}</span>
+    </div>
+    )
+  return (
+    <div className="grid w-60 gap-2 font-mono text-xs">
+      <div className="flex items-baseline justify-between">
+        <span className="tnum text-base font-bold">{s.status === 'waiting' ? (x === 0 ? 'now' : `${fmtClock(x)} ago`) : fmtClock(x)}</span>
+        <span className="font-sans text-[11px] text-white/40">{isNow ? 'now' : live ? '' : s.ref ? `${s.ref.label} only` : ''}</span>
+      </div>
+      <div className="tnum grid grid-cols-[auto_1fr_1fr_1fr] gap-x-3 gap-y-1">
+        {live && (
+          <>
+            <span />
+            <span className="text-right font-sans text-[10px] text-white/35 uppercase">now</span>
+            <span className="text-right font-sans text-[10px] text-white/35 uppercase">{ref ? 'ref' : ''}</span>
+            <span className="text-right font-sans text-[10px] text-white/35 uppercase">{ref ? 'diff' : ''}</span>
+          </>
+        )}
+        {row('BT', C.bt, c.bt[i], c.refBt[i], '°')}
+        {row('ET', C.et, c.et[i], c.refEt[i], '°')}
+        {row('RoR', C.ror, c.ror[i], c.refRor[i])}
+      </div>
+      {live && (
+        <div className="flex gap-4 border-t border-white/10 pt-2">
+          <span style={{ color: C.gas }}>gas {c.gas[i]?.toFixed(0)}%</span>
+          <span style={{ color: C.air }}>air {c.fan[i]?.toFixed(0)}%</span>
+        </div>
+      )}
+      {(here.length > 0 || notes.length > 0) && (
+        <div className="grid gap-1 border-t border-white/10 pt-2 font-sans">
+          {here.map((e) => (
+            <span key={e.kind} className="text-accent">
+              {EVENT_LABEL[e.kind]} · {fmtClock(e.t)}
+            </span>
+          ))}
+          {notes.map((n) => (
+            <span key={n.id} className="text-white/85">
+              “{n.text}”
+            </span>
+          ))}
+        </div>
+      )}
+      {live && s.status !== 'waiting' && <span className="font-sans text-[10px] text-white/35">Click to mark an event or add a note</span>}
     </div>
   )
 }
