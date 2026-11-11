@@ -19,17 +19,18 @@ Rust (Cargo workspace at the root):
 ```
 crates/roast     pure roast calculations (RoR, ...)
 crates/regmap    register map loading, validation, encode/decode
+crates/machine   machine facts from the manual (fan % → m³/h, drum % → rpm)
+crates/sim       PLC simulator: thermal model, interlocks, autopilot; binary serves Modbus TCP :5502 + HTTP panel :8080 on loopback
 crates/plc       async Modbus client by point name (timeouts, reconnect, loopback-only writes) and poller with backoff
 ```
 
 Go code, to be replaced by Rust (ADR 0002):
 
 ```
-cmd/sim        PLC simulator: Modbus TCP :5502 + HTTP control panel :8080
 cmd/probe      line-based Modbus client (read, CSV, one-off writes)
 cmd/monitor    terminal dashboard (Bubble Tea) with live readings and keyboard commands
-internal/regmap  register map loading, encode/decode (ported to crates/regmap; kept until plc and sim move)
-internal/sim     thermal model, PLC state, interlocks, autopilot
+internal/regmap  register map loading, encode/decode (ported to crates/regmap; kept for the Go tools)
+internal/sim     thermal model (ported to crates/sim; kept only for the Go plc tests)
 internal/plc     Modbus client: read/write by point name, reconnect with backoff (ported to crates/plc; kept until probe and monitor move)
 internal/roast   pure roast calculations (ported to crates/roast; kept until probe and monitor move)
 internal/tui     Bubble Tea model/view for cmd/monitor

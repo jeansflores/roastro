@@ -6,7 +6,7 @@ The code is being rewritten from Go to Rust ([ADR 0002](docs/adr/0002-rewrite-in
 
 | Command | What it is |
 |---|---|
-| `cmd/sim` | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
+| `crates/sim` (Rust) | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
 | `cmd/monitor` | Live terminal dashboard: roast values, link health, keyboard commands, automatic reconnection |
 | `cmd/probe` | One line per reading, optional CSV, one-off writes |
 
@@ -14,7 +14,7 @@ All three behave the same against the simulator and the real machine.
 
 ## Run
 
-Requires Go 1.27. Run from the repository root.
+Requires Rust 1.87 and Go 1.27 (for `monitor` and `probe` until they are ported). Run from the repository root.
 
 ```bash
 make run-sim     # simulator with the autopilot, 10x faster (SPEED=10)
@@ -22,7 +22,7 @@ make monitor     # dashboard against it, in another terminal
 make help        # everything else
 ```
 
-`--auto` (used by `make run-sim`) turns on an "operator" that preheats, charges 5 kg at 200 °C, adjusts gas and air by temperature band, drops at 210 °C, cools and starts over. Without `--auto`, you (or your app) are in control. To skip the cold warm-up: `curl 'localhost:8080/preheat?temp=200'`.
+Both servers listen on loopback by default (`--modbus tcp://127.0.0.1:5502`, `--http 127.0.0.1:8080`); pass another address to expose them. `--auto` (used by `make run-sim`) turns on an "operator" that preheats, charges 5 kg at 200 °C, adjusts gas and air by temperature band, drops at 210 °C, cools and starts over. Without `--auto`, you (or your app) are in control. To skip the cold warm-up: `curl 'localhost:8080/preheat?temp=200'`.
 
 ### Monitor
 

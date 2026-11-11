@@ -7,8 +7,9 @@ SPEED ?= 10
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
 
-build: ## Build all binaries into ./bin
+build: ## Build the Go tools into ./bin and the Rust binaries into ./target/release
 	go build -o bin/ ./cmd/...
+	cargo build --workspace --release
 
 test: ## Run all Go (race detector) and Rust tests
 	go test -race ./...
@@ -23,7 +24,7 @@ fmt: ## Format code
 	golangci-lint fmt
 
 run-sim: ## Run the simulator with the autopilot (SPEED=10)
-	go run ./cmd/sim --auto --speed $(SPEED)
+	cargo run -q -p sim -- --auto --speed $(SPEED)
 
 monitor: ## Run the terminal monitor against the local simulator (SPEED=10)
 	go run ./cmd/monitor --time-scale $(SPEED)
