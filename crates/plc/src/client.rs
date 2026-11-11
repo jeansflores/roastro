@@ -272,13 +272,24 @@ async fn call<T>(
         Err(_) => Err(Error::Timeout { op: op.to_owned() }),
         Ok(Err(source)) => Err(Error::Transport {
             op: op.to_owned(),
-            source,
+            source: closed_as_eof(source),
         }),
         Ok(Ok(Err(code))) => Err(Error::Exception {
             op: op.to_owned(),
             code,
         }),
         Ok(Ok(Ok(value))) => Ok(value),
+    }
+}
+
+/// The peer closing the socket can surface as an OS error with code 0, which
+/// prints as "Success (os error 0)". Say what happened instead.
+fn closed_as_eof(err: tokio_modbus::Error) -> tokio_modbus::Error {
+    match err {
+        tokio_modbus::Error::Transport(io) if io.raw_os_error() == Some(0) => {
+            io::Error::new(io::ErrorKind::UnexpectedEof, "connection closed by the PLC").into()
+        }
+        other => other,
     }
 }
 

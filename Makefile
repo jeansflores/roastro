@@ -30,4 +30,4 @@ monitor: ## Run the terminal monitor against the local simulator (SPEED=10)
 	go run ./cmd/monitor --time-scale $(SPEED)
 
 probe: ## Run the line-based probe against the local simulator (SPEED=10)
-	go run ./cmd/probe --time-scale $(SPEED)
+	cargo run -q -p probe -- --time-scale $(SPEED)

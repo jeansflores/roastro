@@ -1,0 +1,20 @@
+[package]
+name = "probe"
+version = "0.1.0"
+description = "Line-based Modbus client: one line per reading, optional CSV, one-off writes."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+jiff.workspace = true
+plc = { path = "../plc" }
+regmap = { path = "../regmap" }
+roast = { path = "../roast" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros"] }
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

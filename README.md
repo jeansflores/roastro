@@ -8,13 +8,13 @@ The code is being rewritten from Go to Rust ([ADR 0002](docs/adr/0002-rewrite-in
 |---|---|
 | `crates/sim` (Rust) | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
 | `cmd/monitor` | Live terminal dashboard: roast values, link health, keyboard commands, automatic reconnection |
-| `cmd/probe` | One line per reading, optional CSV, one-off writes |
+| `crates/probe` (Rust) | One line per reading, optional CSV, one-off writes |
 
 All three behave the same against the simulator and the real machine.
 
 ## Run
 
-Requires Rust 1.87 and Go 1.27 (for `monitor` and `probe` until they are ported). Run from the repository root.
+Requires Rust 1.87 and Go 1.27 (for `monitor` until it is ported). Run from the repository root.
 
 ```bash
 make run-sim     # simulator with the autopilot, 10x faster (SPEED=10)
@@ -65,7 +65,7 @@ b burner · d drum · f fan · s stirrer · c cooler · +/- gas · ]/[ air · }/
 ### Sending commands
 
 ```bash
-go run ./cmd/probe set drum_on=1 fan_on=1 burner=1 gas_cmd=60
+cargo run -q -p probe -- set drum_on=1 fan_on=1 burner=1 gas_cmd=60
 ```
 
 Writes are **blocked** when the target is not localhost. For the real machine you must pass `--allow-write` explicitly, and only do so **with someone standing next to the roaster**.
@@ -73,7 +73,7 @@ Writes are **blocked** when the target is not localhost. For the real machine yo
 ## Against the real machine
 
 ```bash
-go run ./cmd/probe --url tcp://192.168.5.11:502 --csv roast.csv
+cargo run -q -p probe -- --url tcp://192.168.5.11:502 --csv roast.csv
 ```
 
 The PC must be on the `192.168.5.x` network, as shown on page 23 of the manual, or connected through Tailscale.
