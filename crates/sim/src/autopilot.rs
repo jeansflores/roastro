@@ -2,6 +2,9 @@ use std::fmt;
 
 use crate::Sim;
 
+/// The autopilot never drops before this much roast time.
+const MIN_ROAST_S: f64 = 240.0;
+
 /// The step of the roast cycle the autopilot is in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Phase {
@@ -108,7 +111,10 @@ impl Autopilot {
                     set("gas_cmd", 50.0);
                     set("fan", 65.0);
                 }
-                if snap.bt >= self.drop_temp && s.drop_batch().is_ok() {
+                // A drum still hot from the last batch can read above the drop
+                // temperature right after charge; no real roast is that short.
+                let roasted_long_enough = snap.roast_elapsed >= MIN_ROAST_S;
+                if roasted_long_enough && snap.bt >= self.drop_temp && s.drop_batch().is_ok() {
                     let mut set = |name: &str, v: f64| {
                         let _ = s.set(name, v);
                     };
