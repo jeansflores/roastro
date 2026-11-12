@@ -80,7 +80,7 @@ The PC must be on the `192.168.5.x` network, as shown on page 23 of the manual, 
 
 ## ⚠️ The register map is provisional
 
-The addresses in `configs/regmap.json` are **made up**. When the Carmomaq `.aset` file arrives, change `kind`, `addr`, `scale` and `signed` on each point. The `name` values are fixed, because that is how the simulator and the app find each other. No code changes are needed.
+The addresses in `configs/regmap.json` are made up for the simulator. The real machine's layout comes from Artisan's Caloratto 2.0 preset and is described in [`docs/context.md`](docs/context.md) ("Register map"). Its read-only part (temperatures, gas, drum, fan at holding 43–47) is in `configs/regmap.caloratto-2.0.json`, for the first session on the machine; the simulator can serve that layout too: `make run-sim MAP=configs/regmap.caloratto-2.0.json`. The `name` values are fixed, because that is how the simulator and the app find each other.
 
 ## What the model covers (and what it does not)
 

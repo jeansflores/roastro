@@ -288,4 +288,20 @@ mod tests {
         assert!(m.by_name("bt").is_some(), r#"no "bt" point"#);
         assert_eq!(m.at(Kind::Coil, 0).map(|p| p.name.as_str()), Some("burner"));
     }
+
+    /// Keeps the read-only map for the first session on the real machine
+    /// loadable, and read-only.
+    #[test]
+    fn loads_the_real_machine_test_map() {
+        let m = Map::load(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../../configs/regmap.caloratto-2.0.json"
+        ))
+        .expect("load");
+        assert_eq!(m.by_name("bt").map(|p| p.addr), Some(44));
+        assert!(
+            m.points().iter().all(|p| !p.writable),
+            "the test map must not allow writes"
+        );
+    }
 }
