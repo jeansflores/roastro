@@ -6,6 +6,7 @@ Written in Rust ([ADR 0002](docs/adr/0002-rewrite-in-rust.md)).
 
 | Command | What it is |
 |---|---|
+| `crates/roastro` | The app: reads the PLC once a second and records every roast in SQLite (Charge, turning point and Drop detected automatically). The API and the web UI come next. |
 | `crates/sim` | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
 | `crates/monitor` | Live terminal dashboard: roast values, link health, keyboard commands, automatic reconnection |
 | `crates/probe` | One line per reading, optional CSV, one-off writes |
@@ -18,6 +19,7 @@ Requires Rust 1.87. Run from the repository root.
 
 ```bash
 make run-sim     # simulator with the autopilot, 10x faster (SPEED=10)
+make run         # Roastro recording from it into ./roastro.db, in another terminal
 make monitor     # dashboard against it, in another terminal
 make help        # everything else
 ```

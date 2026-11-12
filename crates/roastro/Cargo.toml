@@ -1,0 +1,23 @@
+[package]
+name = "roastro"
+version = "0.1.0"
+description = "The Roastro app: reads the PLC, records every roast."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+clap.workspace = true
+dirs.workspace = true
+plc = { path = "../plc" }
+recorder = { path = "../recorder" }
+regmap = { path = "../regmap" }
+roast = { path = "../roast" }
+store = { path = "../store" }
+tokio = { workspace = true, features = ["rt-multi-thread", "macros", "signal", "sync"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
+
+[lints]
+workspace = true

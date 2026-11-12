@@ -3,7 +3,7 @@
 SPEED ?= 10
 MAP ?= configs/regmap.json
 
-.PHONY: help build test lint fmt run-sim monitor probe
+.PHONY: help build test lint fmt run run-sim monitor probe
 
 help: ## Show this help
 	@grep -E '^[a-z-]+:.*## ' $(MAKEFILE_LIST) | awk 'BEGIN {FS = ":.*## "}; {printf "  %-10s %s\n", $$1, $$2}'
@@ -20,6 +20,9 @@ lint: ## Check formatting and run clippy with warnings as errors
 
 fmt: ## Format code
 	cargo fmt --all
+
+run: ## Run Roastro against the local simulator, recording into ./roastro.db (SPEED=10, MAP=...)
+	cargo run -q -p roastro -- --time-scale $(SPEED) --map $(MAP) --db roastro.db
 
 run-sim: ## Run the simulator with the autopilot (SPEED=10, MAP=configs/regmap.json)
 	cargo run -q -p sim -- --auto --speed $(SPEED) --map $(MAP)

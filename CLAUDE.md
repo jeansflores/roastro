@@ -23,6 +23,7 @@ crates/store     SQLite: schema, embedded migrations on PRAGMA user_version, the
 crates/regmap    register map loading, validation, encode/decode
 crates/machine   machine facts from the manual (fan % → m³/h, drum % → rpm)
 crates/plc       async Modbus client by point name (timeouts, reconnect, loopback-only writes) and poller with backoff
+crates/roastro   the app: polls the PLC, records every roast (recorder + store); API and web UI to come
 crates/sim       PLC simulator: thermal model, interlocks, autopilot; binary serves Modbus TCP :5502 + HTTP panel :8080 on loopback
 crates/probe     line-based Modbus client (read, CSV, one-off writes)
 crates/monitor   terminal dashboard (ratatui) with live readings and keyboard commands
@@ -35,6 +36,7 @@ docs/            context, roadmap, ADRs, reference PDFs
 ```bash
 make test       # cargo test --workspace
 make lint       # cargo fmt --check, cargo clippy -D warnings
+make run        # Roastro recording from the local simulator into ./roastro.db, SPEED=10
 make run-sim    # simulator with autopilot, SPEED=10
 make monitor    # terminal monitor against the local simulator, SPEED=10
 make probe      # line-based probe, SPEED=10

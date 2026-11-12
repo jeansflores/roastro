@@ -154,6 +154,19 @@ impl Closure {
     }
 }
 
+/// Where a roast stood when Roastro stopped, to pick it up again.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Resume {
+    /// Its Charge.
+    pub charge_at: Millis,
+    /// Its last reading (or its Charge, if it has none).
+    pub last_at: Millis,
+    /// Its Drop, if it already happened (the tail was still recording).
+    pub drop_at: Option<Millis>,
+    /// Whether its turning point was already recorded.
+    pub turning_point_known: bool,
+}
+
 /// What the caller must record.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Output {
@@ -233,6 +246,25 @@ impl Recorder {
         }
     }
 
+    /// A recorder picking up a roast that was recording when Roastro stopped.
+    /// The time since `resume.last_at` is a Gap like any other: if it is
+    /// longer than [`Rules::max_gap`], the first input closes the roast.
+    #[must_use]
+    pub fn resume(rules: Rules, resume: Resume) -> Self {
+        let mut r = Self::new(rules);
+        r.phase = match resume.drop_at {
+            Some(drop_at) => Phase::Tail { drop_at },
+            None => Phase::Roasting(Roast {
+                charge_at: resume.charge_at,
+                timer_ran: false,
+                turning_point: (!resume.turning_point_known)
+                    .then_some((f64::INFINITY, resume.charge_at)),
+            }),
+        };
+        r.last_at = Some(resume.last_at);
+        r
+    }
+
     /// Whether a roast is receiving samples (between Charge and the end of
     /// its tail).
     #[must_use]
@@ -273,6 +305,7 @@ impl Recorder {
             self.prev_timer = None;
             self.timer_stalled_at = None;
         }
+        let since_prev = self.last_at.map_or(0, |last| s.at - last);
         let timer = s.timer();
         let timer_advanced =
             matches!((self.prev_timer, timer), (Some(prev), Some(now)) if now > prev);
@@ -289,7 +322,7 @@ impl Recorder {
             Phase::Waiting => {
                 if let Some(at) = timer
                     .filter(|_| timer_advanced)
-                    .and_then(|t| self.charge_by_timer(s.at, t))
+                    .and_then(|t| self.charge_by_timer(s.at, since_prev, t))
                 {
                     self.charge(at, Source::Auto, out);
                 } else if let Some(at) = self.charge_by_bt(s) {
@@ -329,8 +362,12 @@ impl Recorder {
     /// Charge time from a PLC timer that just started counting; `None` if it
     /// has been running too long (a roast already under way is never inferred).
     #[allow(clippy::cast_possible_truncation)]
-    fn charge_by_timer(&self, now: Millis, timer_s: f64) -> Option<Millis> {
-        (timer_s <= self.rules.timer_fresh.as_secs_f64()).then(|| {
+    fn charge_by_timer(&self, now: Millis, since_prev: Millis, timer_s: f64) -> Option<Millis> {
+        // Fresh means it started since the previous reading (plus a margin):
+        // with a fast simulator one reading can already show many seconds.
+        #[allow(clippy::cast_precision_loss)] // reading intervals are seconds
+        let since_prev_s = since_prev as f64 / 1000.0 * self.rules.time_scale;
+        (timer_s <= since_prev_s + self.rules.timer_fresh.as_secs_f64()).then(|| {
             now - (timer_s * 1000.0 / self.rules.time_scale.max(f64::MIN_POSITIVE)) as Millis
         })
     }
@@ -358,26 +395,30 @@ impl Recorder {
     /// enough, and was not already falling before that.
     fn charge_by_bt(&self, now: &Sample) -> Option<Millis> {
         const STEADY_TOLERANCE: f64 = 1.0; // °C of probe noise allowed above the peak
+        const AT_LEAST: usize = 3; // readings before the peak when the window has fewer
         let bt = now.bt()?;
         let window = self.rules.roast_ms(self.rules.charge_window);
         let (peak, at) = peak_since(&self.contiguous, now.at - window)?;
         if peak < self.rules.charge_min_bt || peak - bt < self.rules.charge_drop {
             return None;
         }
-        // Look at the window before the peak: it must exist (a third of it at
-        // least) and never be hotter than the peak.
-        let before: Vec<f64> = self
+        // Look at the readings before the peak (the window, or at least the
+        // last three when readings are sparse, as with a fast simulator):
+        // there must be some, and none hotter than the peak.
+        let earlier: Vec<f64> = self
+            .contiguous
+            .iter()
+            .filter(|s| s.at < at)
+            .filter_map(Sample::bt)
+            .collect();
+        let in_window = self
             .contiguous
             .iter()
             .filter(|s| s.at < at && s.at >= at - window)
-            .filter_map(Sample::bt)
-            .collect();
-        let span = self
-            .contiguous
-            .iter()
-            .find(|s| s.at >= at - window)
-            .map_or(0, |first| at - first.at);
-        let steady = span >= window / 3 && before.iter().all(|&b| b <= peak + STEADY_TOLERANCE);
+            .filter(|s| s.bt().is_some())
+            .count();
+        let before = &earlier[earlier.len() - in_window.max(AT_LEAST).min(earlier.len())..];
+        let steady = !before.is_empty() && before.iter().all(|&b| b <= peak + STEADY_TOLERANCE);
         steady.then_some(at)
     }
 
