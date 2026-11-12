@@ -60,18 +60,24 @@ fn assert_near(got: Millis, want: Millis, tolerance_s: i64, what: &str) {
     );
 }
 
-/// A whole roast from the simulator's autopilot, read once per second with
-/// its PLC timer, as the app would see it.
-#[test]
-fn records_a_simulated_roast() {
+/// A whole roast from the simulator's autopilot, read once per wall-clock
+/// second with its PLC timer, as the app would see it; at `speed` > 1 each
+/// reading is `speed` simulated seconds apart.
+fn simulated_roast(speed: u32) {
+    let rules = Rules {
+        time_scale: f64::from(speed),
+        ..Rules::default()
+    };
     let mut s = sim::Sim::new(1);
     let mut pilot = sim::Autopilot::default();
-    let mut r = Recorder::new(Rules::default());
+    let mut r = Recorder::new(rules);
     let (mut out, mut truth_charge, mut truth_drop, mut was_loaded) =
         (Vec::new(), None, None, false);
-    for second in 0..3 * 3600 {
-        pilot.tick(&mut s);
-        s.step(1.0);
+    for second in 0..3 * 3600 / speed {
+        for _ in 0..speed {
+            pilot.tick(&mut s);
+            s.step(1.0);
+        }
         let sn = s.snapshot();
         let at = f64::from(second + 1);
         if sn.loaded && !was_loaded {
@@ -83,7 +89,8 @@ fn records_a_simulated_roast() {
         was_loaded = sn.loaded;
         let values = ["bt", "et", "timer_s"].map(|n| (n, s.get(n).unwrap()));
         out.extend(r.handle(reading(at, &values)));
-        if truth_drop.is_some_and(|d| ms(at) > d + 40_000) {
+        // Stop 40 simulated seconds (and a few readings) after Drop: past the tail, before the next batch.
+        if truth_drop.is_some_and(|d| ms(at) > d + 40_000 / i64::from(speed) + 3000) {
             break;
         }
     }
@@ -91,29 +98,55 @@ fn records_a_simulated_roast() {
         truth_charge.expect("sim charged"),
         truth_drop.expect("sim dropped"),
     );
+    let wall = |sim_s: u32| i64::from(sim_s * 1000 / speed);
 
     let starts = started(&out);
-    assert_eq!(starts.len(), 1, "one roast: {starts:?}");
+    assert_eq!(starts.len(), 1, "speed {speed}: one roast: {starts:?}");
     let (charge_at, source, lead_in) = starts[0];
     assert_near(charge_at, truth_charge, 3, "charge");
     assert_eq!(source, Source::Auto);
+    let lead = (55 / speed) as usize..=(61 / speed + 1) as usize;
     assert!(
-        (55..=61).contains(&lead_in),
-        "lead-in of {lead_in} readings"
+        lead.contains(&lead_in),
+        "speed {speed}: lead-in of {lead_in} readings"
     );
 
     let (tp, _) = event(&out, EventKind::TurningPoint).expect("turning point");
     assert!(
-        (50_000..=120_000).contains(&(tp - charge_at)),
-        "turning point {} s after charge",
-        (tp - charge_at) / 1000
+        (wall(50)..=wall(120) + 1000).contains(&(tp - charge_at)),
+        "speed {speed}: turning point {} ms after charge",
+        tp - charge_at
     );
 
     let (drop_at, source) = event(&out, EventKind::Drop).expect("drop");
     assert_near(drop_at, truth_drop, 3, "drop");
     assert_eq!(source, Source::Auto);
-    assert_eq!(closures(&out), [Closure::AfterDrop]);
+    assert_eq!(
+        closures(&out),
+        [Closure::AfterDrop],
+        "speed {speed}: drop {drop_at} truth {truth_drop}, last reading {:?}",
+        last_at(&out)
+    );
     assert!(!r.is_recording());
+}
+
+fn last_at(out: &[Output]) -> Option<Millis> {
+    out.iter().rev().find_map(|o| match o {
+        Output::Sample(s) => Some(s.at),
+        _ => None,
+    })
+}
+
+#[test]
+fn records_a_simulated_roast() {
+    simulated_roast(1);
+}
+
+/// The simulator sped up, as used for development (`make run-sim SPEED=10`).
+#[test]
+fn records_a_sped_up_simulated_roast() {
+    simulated_roast(10);
+    simulated_roast(30);
 }
 
 /// BT alone, as on the real machine, which exposes no timer.
@@ -372,4 +405,42 @@ fn records_back_to_back_simulated_roasts() {
         charges,
         "every roast closed"
     );
+}
+
+#[test]
+fn resumes_a_roast_after_a_restart() {
+    let resume = Resume {
+        charge_at: ms(0.0),
+        last_at: ms(100.0),
+        drop_at: None,
+        turning_point_known: true,
+    };
+
+    // Back within five minutes: the roast goes on.
+    let mut r = Recorder::resume(Rules::default(), resume);
+    assert!(r.is_before_drop());
+    let out = run(&mut r, [bt(160.0, 150.0)]);
+    assert!(matches!(out.as_slice(), [Output::Sample(_)]), "{out:?}");
+    assert_eq!(
+        event(&out, EventKind::TurningPoint),
+        None,
+        "turning point not emitted twice"
+    );
+
+    // Back after six minutes: the roast closes as Incomplete and recording waits.
+    let mut r = Recorder::resume(Rules::default(), resume);
+    let out = run(&mut r, [bt(460.0, 150.0)]);
+    assert_eq!(closures(&out), [Closure::Gap]);
+    assert!(!r.is_recording());
+
+    // A roast resumed in its tail finishes the tail.
+    let mut r = Recorder::resume(
+        Rules::default(),
+        Resume {
+            drop_at: Some(ms(90.0)),
+            ..resume
+        },
+    );
+    let out = run(&mut r, [bt(101.0, 150.0), bt(121.0, 150.0)]);
+    assert_eq!(closures(&out), [Closure::AfterDrop]);
 }
