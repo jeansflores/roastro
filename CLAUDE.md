@@ -19,6 +19,7 @@ Cargo workspace at the root:
 ```
 crates/roast     roast vocabulary (event kinds, sources) and pure calculations (RoR, ...)
 crates/recorder  pure lifecycle state machine: readings in, roasts out (Charge/Drop detection, turning point, lead-in, tail, Gaps)
+crates/store     SQLite: schema, embedded migrations on PRAGMA user_version, the roast record
 crates/regmap    register map loading, validation, encode/decode
 crates/machine   machine facts from the manual (fan % → m³/h, drum % → rpm)
 crates/plc       async Modbus client by point name (timeouts, reconnect, loopback-only writes) and poller with backoff
