@@ -22,6 +22,10 @@ _Avoid_: Unfinished, broken roast
 A roast the operator rejects (a false charge, a test); hidden from the history but never erased.
 _Avoid_: Deleted roast
 
+**Gap**:
+A stretch of a roast with no readings, because the PLC or Roastro was out; the roast goes on across it.
+_Avoid_: Outage, dropout, hole
+
 **Reference roast**:
 A past roast chosen to be drawn behind another roast, live or in the history, as the curve to match; usually the best roast of that coffee.
 _Avoid_: Background curve, template, profile (a profile is more than a reference)
