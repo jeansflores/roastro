@@ -17,7 +17,8 @@ Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. 
 Cargo workspace at the root:
 
 ```
-crates/roast     pure roast calculations (RoR, ...)
+crates/roast     roast vocabulary (event kinds, sources) and pure calculations (RoR, ...)
+crates/recorder  pure lifecycle state machine: readings in, roasts out (Charge/Drop detection, turning point, lead-in, tail, Gaps)
 crates/regmap    register map loading, validation, encode/decode
 crates/machine   machine facts from the manual (fan % → m³/h, drum % → rpm)
 crates/plc       async Modbus client by point name (timeouts, reconnect, loopback-only writes) and poller with backoff

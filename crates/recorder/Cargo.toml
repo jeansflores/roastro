@@ -1,0 +1,16 @@
+[package]
+name = "recorder"
+version = "0.1.0"
+description = "Turns the stream of PLC readings into roasts: Charge/Drop detection, turning point, lead-in and tail, Gaps."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[dependencies]
+roast = { path = "../roast" }
+
+[dev-dependencies]
+sim = { path = "../sim" }
+
+[lints]
+workspace = true
