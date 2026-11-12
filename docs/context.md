@@ -73,14 +73,38 @@ Specifications:
 5. Cool in the cooling tray.
 6. Never switch the machine off with the beans above 60 °C.
 
-**Charge and drop are mechanical.** The PLC does not command them and the app does not know about them on its own. Either the user presses a Charge/Drop button in the app (as in Cropster and Artisan), or the app detects them: charge from the sharp BT drop, drop from the behavior afterwards. Both can be done.
+**Charge and drop are mechanical.** The PLC does not move the coffee. Artisan's Caloratto 2.0 preset does tell the PLC about them (holding 50: write 1 at charge, 2 at drop), but whether the PLC exposes them for reading is unknown, so the app cannot count on knowing them on its own. Either the user presses a Charge/Drop button in the app (as in Cropster and Artisan), or the app detects them: charge from the sharp BT drop, drop from the behavior afterwards. Both can be done.
+
+### Register map (from Artisan's Caloratto 2.0 preset, 2026-11-12)
+
+Modbus TCP, port 502, unit 1. Everything is a holding register. Not yet checked on the machine.
+
+| Holding | What | Confidence |
+|---|---|---|
+| 43, 44 | the two temperatures, tenths of °C, unsigned | high; which is BT is unconfirmed (Artisan's first input is usually ET, so 43 = ET, 44 = BT). At charge BT drops far more than ET. |
+| 45 | burner power, 0–100 %, read and written | high |
+| 46 | drum speed, 0–120 %, read and written | high (matches the manual's 0–120 table) |
+| 47 | fan speed, 0–120 %, read and written | high |
+| 50 | write 1 at charge, 2 at drop | medium; readability unknown |
+| 55, 56, 57 | burner, fan, drum on/off: write 1 = on, 2 = off | medium (from button labels) |
+| 52, 58 | two more on/off commands, likely stirrer and cooler | low |
+| 60 | pressure fan on/off (hidden button) | low |
+| 49, 59 | a disabled fourth channel ("damper") | low |
+
+Not in the preset: gas valve feedback, roast point, the PLC timer and the alarm inputs (emergency, flame failure, hopper sensor, safety limit).
+
+What this means for `configs/regmap.json`:
+
+- On/off commands are holding registers with 1 = on, 2 = off, not coils with 1/0. The map format cannot express that yet.
+- Command registers may not be readable. Polling them in the same block read as 43–47 could fail every read, so they need a "write-only" marking before they enter the map. Artisan itself only reads 43–47.
+- Until those are settled, `configs/regmap.caloratto-2.0.json` holds the read-only part (43–47) for the first session on the machine and for running the simulator with the real register layout: `make run-sim MAP=configs/regmap.caloratto-2.0.json`.
 
 ## 3. Useful external resources
 
 - Artisan repo: <https://github.com/artisan-roaster-scope/artisan>.
-  - PR #1233 (2023), sent by Carmomaq's automation lead, brought updated `.aset` setups for post-2020 Carmomaq machines.
-  - Example command seen there: `write(1,60,1)` turns the pressure fan on and `write(1,60,2)` turns it off.
-  - Those `.aset` files may contain the register map.
+  - PR #1233 (2023), sent by Carmomaq's automation lead, brought updated `.aset` setups for post-2020 Carmomaq machines. They live in `src/includes/Machines/Carmomaq/`.
+  - `Caloratto_2.0.aset` matches this machine (host `192.168.5.11`); see "Register map" below. `Caloratto-Materatto_Legacy.aset` is for pre-2020 machines (host `192.168.0.10`, BT/ET only at holding 8000/8001) and does not.
+  - The `.aset` files are not copied into this repository (Artisan is GPLv3); read them there.
 - <https://github.com/turicas/carmomaq>: utilities to collect data from and control Carmomaq roasters.
 - License: Artisan is GPLv3. Reading the `.aset` files to learn the map is fine. Copying Artisan code would make this project GPL. The plan is to write our own code.
 
@@ -107,7 +131,7 @@ Register map points (the **names** are fixed; `addr`/`kind`/`scale` are made up)
 - coil: `burner`(0), `drum_on`(1), `fan_on`(2), `stirrer`(3), `cooler`(4), all writable
 - discrete: `emergency`(0), `flame_fault`(1), `hopper_sensor`(2), `bell`(3), `safety_trip`(4)
 
-When the real `.aset` arrives, only `configs/regmap.json` changes.
+The real register layout is known from Artisan's Caloratto 2.0 preset (see "Register map" above). Moving these names to it needs two format additions first (1/2 on/off encoding, write-only points); the read-only part is in `configs/regmap.caloratto-2.0.json`.
 
 ### Thermal model
 
@@ -150,12 +174,13 @@ Ideas for the app:
 
 First test on the real machine (when the colleague is there):
 
-- Read-only, with the probe on `192.168.5.x`.
-- Record a CSV, which also helps calibrate the simulator.
-- Or scan registers with QModMaster/modpoll to discover the map.
+- Read-only, from a PC on `192.168.5.x`: `cargo run -q -p probe -- --url tcp://192.168.5.11:502 --map configs/regmap.caloratto-2.0.json --csv first-roast.csv`. Writes to a non-local target are blocked, and that map has no writable points.
+- Compare the values with the machine's own panel, and charge once to tell BT from ET.
+- The CSV also helps calibrate the simulator.
+- Do not let AI agents or other tools run commands on the machine's network: Modbus has no authentication and this is a gas roaster.
 
 ## Appendix A: open questions
 
-- The real register map: in Carmomaq's `.aset` (link above) or in the `.aset` files in the Artisan repo. Alternatives: sniff with Wireshark while Artisan runs, or scan with QModMaster.
+- Register map details still open: which of holding 43/44 is BT, whether command registers (50, 52, 55–60) can be read, and where (if anywhere) the PLC exposes gas valve feedback, the timer and the alarms.
 - Confirm the PLC's real interlocks.
 - Exact year of the machine (the schematic is from 2020-07; the manual is rev. 2024).

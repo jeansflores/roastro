@@ -1,0 +1,11 @@
+{
+  "_note": "READ-ONLY TEST MAP for the first session on the real machine. Addresses from Artisan's 'Carmomaq Caloratto' (2.0) preset: temperatures in holding 43/44 in tenths of a degree, gas 45, drum 46, fan 47. Which of 43/44 is BT is unconfirmed (Artisan's first input is usually ET): check at charge, where BT drops far more than ET. No point is writable on purpose; commands use a 1=on/2=off encoding the map cannot express yet.",
+  "unit_id": 1,
+  "points": [
+    { "name": "et", "kind": "holding", "addr": 43, "scale": 10, "signed": false, "unit": "°C", "desc": "Exhaust/air temperature (Artisan input 1; to confirm)" },
+    { "name": "bt", "kind": "holding", "addr": 44, "scale": 10, "signed": false, "unit": "°C", "desc": "Bean temperature (Artisan input 2; to confirm)" },
+    { "name": "gas_cmd", "kind": "holding", "addr": 45, "scale": 1, "unit": "%", "desc": "Burner power, 0-100 (Artisan slider 4)" },
+    { "name": "drum", "kind": "holding", "addr": 46, "scale": 1, "unit": "%", "desc": "Drum speed, 0-120 (Artisan slider 2)" },
+    { "name": "fan", "kind": "holding", "addr": 47, "scale": 1, "unit": "%", "desc": "Fan speed, 0-120 (Artisan slider 1)" }
+  ]
+}

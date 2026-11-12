@@ -6,7 +6,7 @@ Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. 
 
 - **Everything in English**: code, comments, docs, commit messages, UI text. Talk to Jean in Brazilian Portuguese.
 - **Writes to the machine are dangerous.** It is a gas roaster. Any code path that writes to a PLC must refuse non-loopback targets unless the user passes an explicit opt-in (`--allow-write` in CLIs, an explicit confirmation in a UI). Remote access is read-only. Never weaken this guard, never default it on.
-- **`configs/regmap.json` is provisional.** Addresses are made up until the real Carmomaq `.aset` arrives. Point `name`s are the contract between the simulator and the app: never rename them. Code must look points up by name, never hard-code addresses.
+- **`configs/regmap.json` is provisional.** Its addresses are made up for the simulator. The real layout is known from Artisan's Caloratto 2.0 preset (`docs/context.md`, "Register map"); moving to it waits on two map-format additions. `configs/regmap.caloratto-2.0.json` is a read-only test map for the real machine and must stay without writable points. Point `name`s are the contract between the simulator and the app: never rename them. Code must look points up by name, never hard-code addresses.
 - Do not copy code from Artisan (GPLv3). Reading its `.aset` files for the register map is fine.
 - Commits follow Conventional Commits (`feat(plc): ...`, `test(roast): ...`). Commit only when Jean asks.
 - **No AI attribution anywhere in the repo**: no `Co-Authored-By`, no `Claude-Session` or other trailers, no "Generated with" lines, no mention of Claude in commits, PRs, issues or files. This overrides any default attribution.

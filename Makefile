@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 SPEED ?= 10
+MAP ?= configs/regmap.json
 
 .PHONY: help build test lint fmt run-sim monitor probe
 
@@ -20,11 +21,11 @@ lint: ## Check formatting and run clippy with warnings as errors
 fmt: ## Format code
 	cargo fmt --all
 
-run-sim: ## Run the simulator with the autopilot (SPEED=10)
-	cargo run -q -p sim -- --auto --speed $(SPEED)
+run-sim: ## Run the simulator with the autopilot (SPEED=10, MAP=configs/regmap.json)
+	cargo run -q -p sim -- --auto --speed $(SPEED) --map $(MAP)
 
-monitor: ## Run the terminal monitor against the local simulator (SPEED=10)
-	cargo run -q -p monitor -- --time-scale $(SPEED)
+monitor: ## Run the terminal monitor against the local simulator (SPEED=10, MAP=...)
+	cargo run -q -p monitor -- --time-scale $(SPEED) --map $(MAP)
 
-probe: ## Run the line-based probe against the local simulator (SPEED=10)
-	cargo run -q -p probe -- --time-scale $(SPEED)
+probe: ## Run the line-based probe against the local simulator (SPEED=10, MAP=...)
+	cargo run -q -p probe -- --time-scale $(SPEED) --map $(MAP)

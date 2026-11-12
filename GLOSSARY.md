@@ -26,6 +26,10 @@ _Avoid_: Deleted roast
 A past roast chosen to be drawn behind another roast, live or in the history, as the curve to match; usually the best roast of that coffee.
 _Avoid_: Background curve, template, profile (a profile is more than a reference)
 
+**Next roast**:
+What the operator prepares for the coming roast before charge (coffee, green weight, who roasts, reference roast); it is attached to the roast at charge.
+_Avoid_: Pre-roast, setup, draft roast
+
 **Coffee**:
 A green coffee as the roaster names it (e.g. "Bourbon Amarelo – Fazenda X"); a roast names the coffee it roasted (filled in before charge or afterwards), and the history is filtered by it.
 _Avoid_: Bean, product, lot (a lot is one purchase of a coffee)
