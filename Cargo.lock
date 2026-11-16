@@ -1667,6 +1667,7 @@ dependencies = [
  "anyhow",
  "clap",
  "gpui-kit",
+ "jiff",
  "regmap",
  "roast",
  "roastro",

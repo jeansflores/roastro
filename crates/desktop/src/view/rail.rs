@@ -397,6 +397,7 @@ impl RoastScreen {
                     .font_weight(FontWeight::BOLD)
                     .child("Next roast"),
             )
+            .child(self.next_roast_panel(cx))
             .children((!self.big).then(|| pair_large(bt, et)))
             .child(
                 Button::new("next-event")
@@ -665,6 +666,14 @@ impl RoastScreen {
                     )
                     .child(div().text_sm().text_color(white(0.6)).child(loss)),
             )
+            .child(
+                div()
+                    .pt_3()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .child("Next roast"),
+            )
+            .child(self.next_roast_panel(cx))
             .child(
                 div()
                     .flex()

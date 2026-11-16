@@ -84,7 +84,7 @@ pub struct Link {
 }
 
 /// The Next roast.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct NextRoastOut {
     /// Coffee to roast.
     pub coffee_id: Option<Uuid>,
