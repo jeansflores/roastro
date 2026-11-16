@@ -25,8 +25,8 @@ use uuid::Uuid;
 use crate::chart::{self, Geometry};
 use crate::state::{LiveState, Millis};
 
-mod next_roast;
-mod rail;
+pub(crate) mod next_roast;
+pub(crate) mod rail;
 
 /// Paints primary buttons in the screen's amber, with dark text.
 pub fn use_accent(cx: &mut gpui_kit::App) {
@@ -50,7 +50,7 @@ pub struct Engine(pub mpsc::Sender<Request>);
 
 impl Engine {
     /// Queues a request; the reply arrives on the returned channel.
-    fn ask<T>(
+    pub(crate) fn ask<T>(
         &self,
         make: impl FnOnce(Reply<T>) -> Request,
     ) -> Option<oneshot::Receiver<Result<T, roastro::api::ApiError>>> {
@@ -95,6 +95,8 @@ struct Menu {
     /// Clicked ahead of the latest reading: the menu acts on "now".
     ahead: bool,
 }
+
+impl gpui_kit::EventEmitter<crate::roasts::OpenRoast> for RoastScreen {}
 
 impl RoastScreen {
     pub fn new(
@@ -492,7 +494,7 @@ pub(crate) fn clock(s: f64) -> String {
 }
 
 /// `m:ss`, with a minus sign before Charge.
-fn clock_signed(s: f64) -> String {
+pub(crate) fn clock_signed(s: f64) -> String {
     if s < 0.0 {
         format!("−{}", clock(-s))
     } else {
@@ -502,7 +504,7 @@ fn clock_signed(s: f64) -> String {
 
 /// Grams from kilograms as typed ("4.25", "4,250"); `Some(None)` when empty.
 #[allow(clippy::option_option)] // invalid vs. empty (clear the weight)
-fn grams(text: &str) -> Option<Option<i64>> {
+pub(crate) fn grams(text: &str) -> Option<Option<i64>> {
     let text = text.trim().replace(',', ".");
     if text.is_empty() {
         return Some(None);
@@ -515,7 +517,7 @@ fn grams(text: &str) -> Option<Option<i64>> {
     Some(Some((kg * 1000.0).round() as i64))
 }
 
-fn kilograms(grams: i64) -> String {
+pub(crate) fn kilograms(grams: i64) -> String {
     #[allow(clippy::cast_precision_loss)] // a roaster's batch, far inside f64
     let kg = grams as f64 / 1000.0;
     format!("{kg:.3}")
@@ -524,7 +526,7 @@ fn kilograms(grams: i64) -> String {
 /// What the hover card shows at one roast second: live values against the
 /// reference, gas and air, and any event or note right there.
 #[allow(clippy::too_many_lines)] // one card, built top to bottom
-fn hover_card(st: &LiveState, s: f64) -> Option<impl IntoElement> {
+pub(crate) fn hover_card(st: &LiveState, s: f64) -> Option<impl IntoElement> {
     let live = st.sample_near(s);
     let reference = st.reference_near(s);
     if live.is_none() && reference.is_none() {
@@ -660,7 +662,7 @@ pub(crate) fn fmt1(v: Option<f64>) -> String {
     v.map_or_else(|| "—".to_owned(), |v| format!("{v:.1}"))
 }
 
-fn fmt0(v: Option<f64>) -> String {
+pub(crate) fn fmt0(v: Option<f64>) -> String {
     v.map_or_else(|| "—".to_owned(), |v| format!("{v:.0}"))
 }
 
