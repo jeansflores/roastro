@@ -255,8 +255,15 @@ fn edits_fields_notes_discards_and_lists() {
         .collect();
     assert_eq!(older, [first], "cursor");
 
-    st.update_coffee(coffee, Some("Mundo Novo 2026"), Some(true))
-        .unwrap();
+    st.update_coffee(
+        coffee,
+        &CoffeeChange {
+            name: Some("Mundo Novo 2026".into()),
+            archived: Some(true),
+            ..CoffeeChange::default()
+        },
+    )
+    .unwrap();
     assert_eq!(st.coffees(false).unwrap(), []);
     assert_eq!(st.coffees(true).unwrap()[0].name, "Mundo Novo 2026");
     let (before, after) = st.sample_neighbors(first, 5).unwrap();
@@ -322,4 +329,83 @@ fn filters_roasts_by_coffee_charge_time_and_text() {
         [third, second, first],
         "blank is no filter"
     );
+}
+
+#[test]
+fn keeps_coffee_details_and_figures_over_finished_roasts() {
+    let mut st = Store::open_in_memory().unwrap();
+    let coffee = st.add_coffee("Guji").unwrap();
+    let changed = st
+        .update_coffee(
+            coffee,
+            &CoffeeChange {
+                lot: Some("2401".into()),
+                process: Some("Natural".into()),
+                ..CoffeeChange::default()
+            },
+        )
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        (
+            changed.name.as_str(),
+            changed.lot.as_str(),
+            changed.process.as_str()
+        ),
+        ("Guji", "2401", "Natural"),
+        "only the fields given change"
+    );
+    let mut done = |charge: Millis, green: i64, roasted: i64| {
+        let id = st.start_roast(charge, Source::Manual, &[]).unwrap();
+        st.set_event(id, EventKind::FirstCrack, charge + 480_000, Source::Manual)
+            .unwrap();
+        st.set_event(id, EventKind::Drop, charge + 600_000, Source::Manual)
+            .unwrap();
+        st.close_roast(id, Closure::AfterDrop).unwrap();
+        st.update_roast(
+            id,
+            &RoastPatch {
+                coffee_id: Some(Some(coffee)),
+                green_weight_g: Some(Some(green)),
+                roasted_weight_g: Some(Some(roasted)),
+                ..RoastPatch::default()
+            },
+        )
+        .unwrap();
+        id
+    };
+    done(0, 5000, 4250);
+    let second = done(1_000_000, 5000, 4150);
+    let recording = st.start_roast(2_000_000, Source::Manual, &[]).unwrap();
+    st.update_roast(
+        recording,
+        &RoastPatch {
+            coffee_id: Some(Some(coffee)),
+            green_weight_g: Some(Some(5000)),
+            ..RoastPatch::default()
+        },
+    )
+    .unwrap();
+    let stats = st.coffee_stats().unwrap();
+    assert_eq!(stats.len(), 1);
+    let s = &stats[0];
+    assert_eq!(
+        (
+            s.coffee_id,
+            s.roasts,
+            s.last_number,
+            s.last_charge_at,
+            s.green_weight_g
+        ),
+        (
+            coffee,
+            2,
+            st.roast(second).unwrap().number,
+            Some(1_000_000),
+            10_000
+        ),
+        "the roast still recording does not count"
+    );
+    assert!((s.average_development_time_ratio.unwrap() - 0.2).abs() < 1e-9);
+    assert!((s.average_weight_loss_ratio.unwrap() - 0.16).abs() < 1e-9);
 }

@@ -56,12 +56,7 @@ impl Engine {
                 let _ = reply.send(self.put_next_roast(&body));
             }
             Edit::Coffees(archived, reply) => {
-                let coffees = self
-                    .recording
-                    .store()
-                    .coffees(archived)
-                    .map_err(ApiError::internal);
-                let _ = reply.send(coffees.map(|cs| cs.into_iter().map(CoffeeOut::from).collect()));
+                let _ = reply.send(self.coffees(archived));
             }
             Edit::AddCoffee(body, reply) => {
                 let _ = reply.send(self.add_coffee(&body));
@@ -332,12 +327,41 @@ impl Engine {
         Ok(out)
     }
 
+    /// The coffees with how each has roasted.
+    fn coffees(&self, include_archived: bool) -> Result<Vec<CoffeeOut>, ApiError> {
+        let store = self.recording.store();
+        let mut stats = store.coffee_stats().map_err(ApiError::internal)?;
+        let coffees = store
+            .coffees(include_archived)
+            .map_err(ApiError::internal)?;
+        Ok(coffees
+            .into_iter()
+            .map(|c| {
+                let id = c.id;
+                let mut out = CoffeeOut::from(c);
+                out.stats = stats
+                    .iter()
+                    .position(|s| s.coffee_id == id)
+                    .map(|i| stats.swap_remove(i).into());
+                out
+            })
+            .collect())
+    }
+
     fn add_coffee(&mut self, body: &CoffeeIn) -> Result<CoffeeOut, ApiError> {
         let name = non_empty(&body.name, "empty_name", "a coffee needs a name")?;
-        let id = self
-            .recording
-            .store_mut()
-            .add_coffee(name)
+        let store = self.recording.store_mut();
+        let id = store.add_coffee(name).map_err(ApiError::internal)?;
+        let details = store::CoffeeChange {
+            notes: Some(body.notes.trim().to_owned()),
+            lot: Some(body.lot.trim().to_owned()),
+            origin: Some(body.origin.trim().to_owned()),
+            process: Some(body.process.trim().to_owned()),
+            supplier: Some(body.supplier.trim().to_owned()),
+            ..store::CoffeeChange::default()
+        };
+        store
+            .update_coffee(id, &details)
             .map_err(ApiError::internal)?;
         self.coffee_out(id)
     }
@@ -346,11 +370,21 @@ impl Engine {
         let name = body
             .name
             .as_deref()
-            .map(|n| non_empty(n, "empty_name", "a coffee needs a name"))
+            .map(|n| non_empty(n, "empty_name", "a coffee needs a name").map(str::to_owned))
             .transpose()?;
+        let trimmed = |v: &Option<String>| v.as_deref().map(|v| v.trim().to_owned());
+        let change = store::CoffeeChange {
+            name,
+            notes: trimmed(&body.notes),
+            lot: trimmed(&body.lot),
+            origin: trimmed(&body.origin),
+            process: trimmed(&body.process),
+            supplier: trimmed(&body.supplier),
+            archived: body.archived,
+        };
         self.recording
             .store_mut()
-            .update_coffee(id, name, body.archived)
+            .update_coffee(id, &change)
             .map_err(ApiError::internal)?
             .map(CoffeeOut::from)
             .ok_or_else(|| ApiError::not_found("coffee_not_found", format!("no coffee {id}")))

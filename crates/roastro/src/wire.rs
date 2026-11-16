@@ -429,7 +429,39 @@ pub struct CoffeeOut {
     pub id: Uuid,
     pub name: String,
     pub notes: String,
+    pub lot: String,
+    pub origin: String,
+    pub process: String,
+    pub supplier: String,
+    /// The lot is finished.
     pub archived: bool,
+    /// How it has roasted, in listings; absent when it has no finished roast.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub stats: Option<CoffeeStatsOut>,
+}
+
+/// A coffee's figures over its finished roasts.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct CoffeeStatsOut {
+    pub roasts: i64,
+    pub last_number: i64,
+    pub last_charge_at: Option<Millis>,
+    pub green_weight_g: i64,
+    pub average_development_time_ratio: Option<f64>,
+    pub average_weight_loss_ratio: Option<f64>,
+}
+
+impl From<store::CoffeeStats> for CoffeeStatsOut {
+    fn from(s: store::CoffeeStats) -> Self {
+        Self {
+            roasts: s.roasts,
+            last_number: s.last_number,
+            last_charge_at: s.last_charge_at,
+            green_weight_g: s.green_weight_g,
+            average_development_time_ratio: s.average_development_time_ratio,
+            average_weight_loss_ratio: s.average_weight_loss_ratio,
+        }
+    }
 }
 
 impl From<store::Coffee> for CoffeeOut {
@@ -438,21 +470,41 @@ impl From<store::Coffee> for CoffeeOut {
             id: c.id,
             name: c.name,
             notes: c.notes,
+            lot: c.lot,
+            origin: c.origin,
+            process: c.process,
+            supplier: c.supplier,
             archived: c.archived,
+            stats: None,
         }
     }
 }
 
-/// `POST /api/coffees`.
-#[derive(Debug, serde::Deserialize)]
+/// `POST /api/coffees`: a name, and the rest when known.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct CoffeeIn {
     pub name: String,
+    #[serde(default)]
+    pub notes: String,
+    #[serde(default)]
+    pub lot: String,
+    #[serde(default)]
+    pub origin: String,
+    #[serde(default)]
+    pub process: String,
+    #[serde(default)]
+    pub supplier: String,
 }
 
-/// `PATCH /api/coffees/{id}`.
-#[derive(Debug, serde::Deserialize)]
+/// `PATCH /api/coffees/{id}`: only the fields present change.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct CoffeePatch {
     pub name: Option<String>,
+    pub notes: Option<String>,
+    pub lot: Option<String>,
+    pub origin: Option<String>,
+    pub process: Option<String>,
+    pub supplier: Option<String>,
     pub archived: Option<bool>,
 }
 

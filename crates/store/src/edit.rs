@@ -31,10 +31,56 @@ pub struct Coffee {
     pub id: Uuid,
     /// Name as the roaster calls it.
     pub name: String,
-    /// Free text.
+    /// Free text: how it roasts, what to watch.
     pub notes: String,
-    /// Hidden from pickers; its roasts stay visible.
+    /// The supplier's lot.
+    pub lot: String,
+    /// Country or region.
+    pub origin: String,
+    /// Washed, natural, honey…
+    pub process: String,
+    /// Who sold it.
+    pub supplier: String,
+    /// The lot is finished: hidden from pickers; its roasts stay visible.
     pub archived: bool,
+}
+
+/// What changes on a coffee: only the fields given.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct CoffeeChange {
+    /// New name.
+    pub name: Option<String>,
+    /// New notes.
+    pub notes: Option<String>,
+    /// New lot.
+    pub lot: Option<String>,
+    /// New origin.
+    pub origin: Option<String>,
+    /// New process.
+    pub process: Option<String>,
+    /// New supplier.
+    pub supplier: Option<String>,
+    /// Finished (or back in use).
+    pub archived: Option<bool>,
+}
+
+/// How a coffee has roasted: its finished roasts, not discarded.
+#[derive(Debug, Clone, PartialEq)]
+pub struct CoffeeStats {
+    /// Which coffee.
+    pub coffee_id: Uuid,
+    /// How many roasts.
+    pub roasts: i64,
+    /// The newest one's number.
+    pub last_number: i64,
+    /// When the newest one was charged.
+    pub last_charge_at: Option<Millis>,
+    /// Green coffee roasted, grams.
+    pub green_weight_g: i64,
+    /// Mean Development time ratio of the roasts with First crack and Drop.
+    pub average_development_time_ratio: Option<f64>,
+    /// Mean weight loss of the roasts with both weights.
+    pub average_weight_loss_ratio: Option<f64>,
 }
 
 /// Which roasts a listing shows. The default lists every roast not discarded.
@@ -263,24 +309,30 @@ impl Store {
     /// Fails on a database error.
     pub fn coffees(&self, include_archived: bool) -> Result<Vec<Coffee>> {
         let mut stmt = self.conn.prepare(
-            "SELECT id, name, notes, archived FROM coffee WHERE ?1 OR archived = 0 ORDER BY name COLLATE NOCASE",
+            "SELECT id, name, notes, lot, origin, process, supplier, archived FROM coffee
+             WHERE ?1 OR archived = 0 ORDER BY name COLLATE NOCASE",
         )?;
         let rows = stmt.query_map([include_archived], |r| {
             Ok((
                 r.get::<_, String>(0)?,
-                r.get::<_, String>(1)?,
-                r.get::<_, String>(2)?,
-                r.get::<_, bool>(3)?,
+                Coffee {
+                    id: Uuid::nil(),
+                    name: r.get(1)?,
+                    notes: r.get(2)?,
+                    lot: r.get(3)?,
+                    origin: r.get(4)?,
+                    process: r.get(5)?,
+                    supplier: r.get(6)?,
+                    archived: r.get(7)?,
+                },
             ))
         })?;
         let mut out = Vec::new();
         for row in rows {
-            let (id, name, notes, archived) = row?;
+            let (id, coffee) = row?;
             out.push(Coffee {
                 id: parse_uuid(&id)?,
-                name,
-                notes,
-                archived,
+                ..coffee
             });
         }
         Ok(out)
@@ -295,44 +347,102 @@ impl Store {
         Ok(self
             .conn
             .query_row(
-                "SELECT name, notes, archived FROM coffee WHERE id = ?1",
+                "SELECT name, notes, lot, origin, process, supplier, archived FROM coffee WHERE id = ?1",
                 [id.to_string()],
                 |r| {
                     Ok(Coffee {
                         id,
                         name: r.get(0)?,
                         notes: r.get(1)?,
-                        archived: r.get(2)?,
+                        lot: r.get(2)?,
+                        origin: r.get(3)?,
+                        process: r.get(4)?,
+                        supplier: r.get(5)?,
+                        archived: r.get(6)?,
                     })
                 },
             )
             .optional()?)
     }
 
-    /// Renames and/or archives a coffee; `None` if it does not exist.
+    /// Changes the fields given; `None` if the coffee does not exist.
     ///
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn update_coffee(
-        &mut self,
-        id: Uuid,
-        name: Option<&str>,
-        archived: Option<bool>,
-    ) -> Result<Option<Coffee>> {
-        if let Some(name) = name {
-            self.conn.execute(
-                "UPDATE coffee SET name = ?1 WHERE id = ?2",
-                params![name, id.to_string()],
-            )?;
+    pub fn update_coffee(&mut self, id: Uuid, change: &CoffeeChange) -> Result<Option<Coffee>> {
+        let texts = [
+            ("name", &change.name),
+            ("notes", &change.notes),
+            ("lot", &change.lot),
+            ("origin", &change.origin),
+            ("process", &change.process),
+            ("supplier", &change.supplier),
+        ];
+        let tx = self.conn.transaction()?;
+        for (column, value) in texts {
+            if let Some(value) = value {
+                // The column names are this list's own, never input.
+                tx.execute(
+                    &format!("UPDATE coffee SET {column} = ?1 WHERE id = ?2"),
+                    params![value, id.to_string()],
+                )?;
+            }
         }
-        if let Some(archived) = archived {
-            self.conn.execute(
+        if let Some(archived) = change.archived {
+            tx.execute(
                 "UPDATE coffee SET archived = ?1 WHERE id = ?2",
                 params![archived, id.to_string()],
             )?;
         }
+        tx.commit()?;
         self.coffee(id)
+    }
+
+    /// Every coffee's figures over its finished roasts on this machine.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn coffee_stats(&self) -> Result<Vec<CoffeeStats>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT r.coffee_id, COUNT(*), MAX(r.number), MAX(c.at),
+                    COALESCE(SUM(r.green_weight_g), 0),
+                    AVG(CASE WHEN d.at > c.at AND f.at IS NOT NULL
+                             THEN CAST(d.at - f.at AS REAL) / (d.at - c.at) END),
+                    AVG(CASE WHEN r.roasted_weight_g IS NOT NULL AND r.green_weight_g IS NOT NULL
+                             THEN 1.0 - CAST(r.roasted_weight_g AS REAL) / r.green_weight_g END)
+             FROM roast r
+             LEFT JOIN roast_event c ON c.roast_id = r.id AND c.kind = 'charge'
+             LEFT JOIN roast_event f ON f.roast_id = r.id AND f.kind = 'first_crack'
+             LEFT JOIN roast_event d ON d.roast_id = r.id AND d.kind = 'drop'
+             WHERE r.machine_id = ?1 AND r.coffee_id IS NOT NULL
+               AND r.discarded_at IS NULL AND r.state <> 'recording'
+             GROUP BY r.coffee_id",
+        )?;
+        let rows = stmt.query_map([self.machine_id.to_string()], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                CoffeeStats {
+                    coffee_id: Uuid::nil(),
+                    roasts: r.get(1)?,
+                    last_number: r.get(2)?,
+                    last_charge_at: r.get(3)?,
+                    green_weight_g: r.get(4)?,
+                    average_development_time_ratio: r.get(5)?,
+                    average_weight_loss_ratio: r.get(6)?,
+                },
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, stats) = row?;
+            out.push(CoffeeStats {
+                coffee_id: parse_uuid(&id)?,
+                ..stats
+            });
+        }
+        Ok(out)
     }
 
     /// Roasts newest first, `limit` at a time, as the query narrows them.

@@ -718,11 +718,16 @@ mod tests {
             Edit::AddCoffee(
                 CoffeeIn {
                     name: "Bourbon".into(),
+                    lot: " 2401 ".into(),
+                    ..CoffeeIn::default()
                 },
                 r,
             )
         })
         .unwrap();
+        assert_eq!(coffee.lot, "2401", "details are kept, trimmed");
+        let coffees = edit(&mut e, |r| Edit::Coffees(false, r)).unwrap();
+        assert_eq!(coffees[0].stats, None, "no figures before a finished roast");
         let patch = RoastPatchIn {
             coffee_id: Some(Some(coffee.id)),
             ..RoastPatchIn::default()

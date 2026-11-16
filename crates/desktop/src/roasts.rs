@@ -138,6 +138,13 @@ impl RoastsPage {
 
     /// Lists from the newest again, as the filters say. Called when a filter
     /// changes and when a roast finishes.
+    /// Lists one coffee's roasts, from its page.
+    pub fn show_coffee(&mut self, coffee: Uuid, cx: &mut Context<Self>) {
+        self.coffee_id = Some(coffee);
+        self.load_coffees(cx);
+        self.reload(cx);
+    }
+
     pub fn reload(&mut self, cx: &mut Context<Self>) {
         self.generation += 1;
         self.fetch(None, cx);
