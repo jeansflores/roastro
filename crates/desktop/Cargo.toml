@@ -18,6 +18,7 @@ ui-test = ["gpui-kit/test-support"]
 anyhow.workspace = true
 clap.workspace = true
 gpui-kit.workspace = true
+jiff.workspace = true
 regmap = { path = "../regmap" }
 roast = { path = "../roast" }
 roastro = { path = "../roastro" }
