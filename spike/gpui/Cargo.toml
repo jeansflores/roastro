@@ -1,0 +1,23 @@
+# SPIKE, throwaway: can Roastro's UI be native Rust with GPUI + gpui-component?
+# Its own workspace, so the main `make test` does not build GPUI.
+[workspace]
+
+[package]
+name = "roastro-gpui-spike"
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+gpui-kit = "=0.9.1"
+plc = { path = "../../crates/plc" }
+recorder = { path = "../../crates/recorder" }
+regmap = { path = "../../crates/regmap" }
+roast = { path = "../../crates/roast" }
+sim = { path = "../../crates/sim" }
+tokio-modbus = { version = "0.17.0", default-features = false, features = ["tcp-server"] }
+tokio = { version = "1.54.1", features = ["rt-multi-thread", "sync", "time", "macros", "net"] }
+
+[features]
+# Headless UI tests: cargo test --features ui-test
+ui-test = ["gpui-kit/test-support"]

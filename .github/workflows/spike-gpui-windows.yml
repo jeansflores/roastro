@@ -1,0 +1,42 @@
+# SPIKE, throwaway: does the GPUI live roast screen build and run on Windows?
+name: spike-gpui-windows
+
+on:
+  push:
+    branches: [spike/gpui]
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    defaults:
+      run:
+        working-directory: spike/gpui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: spike/gpui
+      - name: Build (release)
+        run: cargo build --release --locked
+      - name: Headless UI test
+        run: cargo test --release --locked --features ui-test
+      - name: Smoke run (opens the window for 20 s, embedded simulator)
+        continue-on-error: true
+        shell: pwsh
+        run: |
+          $p = Start-Process -FilePath target\release\roastro-gpui-spike.exe -ArgumentList '--exit-after','20' -PassThru -RedirectStandardError smoke-err.txt -RedirectStandardOutput smoke-out.txt
+          if (-not $p.WaitForExit(60000)) { Stop-Process $p; throw "did not exit in 60 s" }
+          Get-Content smoke-err.txt, smoke-out.txt
+          "exit code: $($p.ExitCode)"
+          if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
+      - name: Size
+        shell: pwsh
+        run: (Get-Item target\release\roastro-gpui-spike.exe).Length / 1MB
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roastro-gpui-spike-windows
+          path: spike/gpui/target/release/roastro-gpui-spike.exe
