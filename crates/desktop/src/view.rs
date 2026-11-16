@@ -2,27 +2,46 @@
 //! chart first, a rail with the big numbers, the phases, the next event and a
 //! timeline of events and notes.
 
-use gpui_kit::component::button::{Button, ButtonVariants as _};
+use gpui_kit::component::button::Button;
 use std::cell::Cell;
 use std::rc::Rc;
 
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
+use gpui_kit::component::theme::Theme;
 use gpui_kit::prelude::*;
 use gpui_kit::{
     AnyElement, AsyncApp, Context, Entity, FontWeight, Hsla, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, Pixels, Point, SharedString, Subscription, WeakEntity, Window,
-    anchored, deferred, div, point, px, relative, rgb,
+    anchored, deferred, div, point, px, rgb,
 };
 use roast::EventKind;
 use roastro::engine::{Edit, Reply, Request};
-use roastro::wire::{EventIn, Live, NoteIn};
+use roastro::wire::{EventIn, Live, NoteIn, RoastPatchIn};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::chart::{self, Geometry, faded};
+use crate::chart::{self, Geometry};
 use crate::state::{LiveState, Millis};
+
+mod rail;
+
+/// Paints primary buttons in the screen's amber, with dark text.
+pub fn use_accent(cx: &mut gpui_kit::App) {
+    let theme = Theme::global_mut(cx);
+    let accent = rail::accent();
+    theme.primary = accent;
+    theme.primary_hover = Hsla {
+        l: accent.l + 0.06,
+        ..accent
+    };
+    theme.primary_active = Hsla {
+        l: accent.l - 0.06,
+        ..accent
+    };
+    theme.primary_foreground = rgb(0x000b_0c0e).into();
+}
 
 /// The engine's request queue, as the UI uses it.
 #[derive(Clone)]
@@ -54,7 +73,15 @@ pub struct RoastScreen {
     menu: Option<Menu>,
     menu_note: Entity<InputState>,
     /// Keeps the menu note's Enter handler alive.
-    subscriptions: Vec<Subscription>,
+    menu_subscription: Option<Subscription>,
+    /// "Big numbers": the readouts in a strip across the top.
+    big: bool,
+    /// The roasted weight in kilograms, after Drop.
+    weight: Entity<InputState>,
+    /// The roast whose stored weight the field shows.
+    weight_for: Option<Uuid>,
+    /// Keeps the roasted weight's Enter handler alive.
+    _weight_subscription: Subscription,
 }
 
 /// The chart's click menu: an instant to mark an event or add a note on.
@@ -74,15 +101,13 @@ impl RoastScreen {
         cx: &mut Context<Self>,
     ) -> Self {
         let menu_note = cx.new(|cx| InputState::new(window, cx));
-        let enter = cx.subscribe_in(
-            &menu_note,
-            window,
-            |this, _, event: &InputEvent, window, cx| {
+        let weight = cx.new(|cx| InputState::new(window, cx).placeholder("0.000"));
+        let weight_subscription =
+            cx.subscribe_in(&weight, window, |this, _, event: &InputEvent, _, cx| {
                 if matches!(event, InputEvent::PressEnter { .. }) {
-                    this.menu_add_note(window, cx);
+                    this.save_weight(cx);
                 }
-            },
-        );
+            });
         let screen = Self {
             state: LiveState::new(time_scale),
             engine,
@@ -92,7 +117,11 @@ impl RoastScreen {
             hover: None,
             menu: None,
             menu_note,
-            subscriptions: vec![enter],
+            menu_subscription: None,
+            big: false,
+            weight,
+            weight_for: None,
+            _weight_subscription: weight_subscription,
         };
         cx.spawn(async move |this, cx| follow(this, cx).await)
             .detach();
@@ -125,9 +154,8 @@ impl RoastScreen {
                 .await
                 .ok()?
                 .ok()?;
-            let charge_at = roast.charge_at?;
             this.update(cx, |screen, cx| {
-                screen.state.set_reference(id, charge_at, &columns);
+                screen.state.set_reference(&roast, &columns);
                 cx.notify();
             })
             .ok()
@@ -225,7 +253,7 @@ impl RoastScreen {
                 }
             },
         );
-        self.subscriptions = vec![enter];
+        self.menu_subscription = Some(enter);
         cx.notify();
     }
 
@@ -362,6 +390,60 @@ impl RoastScreen {
         )
     }
 
+    /// Removes a mark the operator made (Dry end, First crack, Second crack).
+    fn unmark(&mut self, kind: EventKind, cx: &mut Context<Self>) {
+        let Some(roast) = self.state.roast.as_ref() else {
+            return;
+        };
+        let id = roastro::RoastId(roast.id);
+        self.send(
+            |r| Request::Edit(Edit::DeleteEvent(id, kind.as_str().to_owned(), r)),
+            cx,
+        );
+    }
+
+    fn remove_note(&mut self, note: Uuid, cx: &mut Context<Self>) {
+        let Some(roast) = self.state.roast.as_ref() else {
+            return;
+        };
+        let id = roastro::RoastId(roast.id);
+        self.send(|r| Request::Edit(Edit::DeleteNote(id, note, r)), cx);
+    }
+
+    /// Stores the roasted weight typed in kilograms; empty clears it.
+    fn save_weight(&mut self, cx: &mut Context<Self>) {
+        let Some(roast) = self.state.roast.as_ref() else {
+            return;
+        };
+        let id = roastro::RoastId(roast.id);
+        let text = self.weight.read(cx).value().to_string();
+        let Some(grams) = grams(&text) else {
+            self.message = Some("roasted weight: kilograms, like 4.250".into());
+            cx.notify();
+            return;
+        };
+        let patch = RoastPatchIn {
+            roasted_weight_g: Some(grams),
+            ..RoastPatchIn::default()
+        };
+        self.send(|r| Request::Edit(Edit::PatchRoast(id, patch, r)), cx);
+    }
+
+    /// Shows the stored roasted weight once a roast is done, without
+    /// overwriting what the operator is typing for the same roast.
+    fn sync_weight(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(roast) = self.state.roast.as_ref().filter(|r| r.state == "done") else {
+            return;
+        };
+        if self.weight_for == Some(roast.id) {
+            return;
+        }
+        self.weight_for = Some(roast.id);
+        let text = roast.roasted_weight_g.map(kilograms).unwrap_or_default();
+        self.weight
+            .update(cx, |input, cx| input.set_value(text, window, cx));
+    }
+
     fn add_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.note.read(cx).value().to_string();
         let (Some(roast), Some(at)) = (self.state.roast.as_ref(), self.state.now()) else {
@@ -411,6 +493,27 @@ fn clock_signed(s: f64) -> String {
     } else {
         clock(s)
     }
+}
+
+/// Grams from kilograms as typed ("4.25", "4,250"); `Some(None)` when empty.
+#[allow(clippy::option_option)] // invalid vs. empty (clear the weight)
+fn grams(text: &str) -> Option<Option<i64>> {
+    let text = text.trim().replace(',', ".");
+    if text.is_empty() {
+        return Some(None);
+    }
+    let kg: f64 = text
+        .parse()
+        .ok()
+        .filter(|kg: &f64| kg.is_finite() && *kg > 0.0)?;
+    #[allow(clippy::cast_possible_truncation)] // a roaster's batch, far inside i64
+    Some(Some((kg * 1000.0).round() as i64))
+}
+
+fn kilograms(grams: i64) -> String {
+    #[allow(clippy::cast_precision_loss)] // a roaster's batch, far inside f64
+    let kg = grams as f64 / 1000.0;
+    format!("{kg:.3}")
 }
 
 /// What the hover card shows at one roast second: live values against the
@@ -565,356 +668,193 @@ fn white(a: f32) -> Hsla {
     }
 }
 
-fn readout(
-    label: &'static str,
-    value: String,
-    color: Hsla,
-    big: bool,
-    sub: Option<String>,
-) -> impl IntoElement {
-    let number = div()
-        .font_weight(FontWeight::BOLD)
-        .text_color(color)
-        .child(value);
-    let number = if big {
-        number.text_size(px(44.))
-    } else {
-        number.text_2xl()
-    };
-    div()
-        .flex()
-        .flex_col()
-        .child(div().text_xs().text_color(white(0.45)).child(label))
-        .child(number)
-        .children(sub.map(|s| div().text_xs().text_color(white(0.5)).child(s)))
+impl RoastScreen {
+    /// The bar across the top: status, coffee, reference, "Big numbers".
+    #[allow(clippy::too_many_lines)] // one bar, left to right
+    fn header(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let st = &self.state;
+        let (status, color): (SharedString, Hsla) = if !st.connected() {
+            let text = st
+                .link
+                .as_ref()
+                .and_then(|l| l.error.clone())
+                .map_or("Connecting to the PLC…".into(), |e| {
+                    format!("PLC disconnected: {e}").into()
+                });
+            (text, rgb(0x00f8_7171).into())
+        } else if st.recording() {
+            ("Recording".into(), rail::accent())
+        } else if st.roast.is_some() {
+            ("Done".into(), chart::ror())
+        } else {
+            ("Waiting for charge".into(), white(0.7))
+        };
+        let roast = st.roast.as_ref();
+        let coffee = roast.and_then(|r| r.coffee.as_ref().map(|c| c.name.clone()));
+        let green = roast
+            .and_then(|r| r.green_weight_g)
+            .or_else(|| st.next.as_ref().and_then(|n| n.green_weight_g));
+        let reference = roast.map_or_else(
+            || "No reference".to_owned(),
+            |r| {
+                r.reference.as_ref().map_or("No reference".to_owned(), |r| {
+                    format!("Reference Roast #{}", r.number)
+                })
+            },
+        );
+        let big = self.big;
+        div()
+            .flex()
+            .flex_none()
+            .h(px(52.))
+            .items_center()
+            .gap_4()
+            .px_5()
+            .border_b_1()
+            .border_color(white(0.08))
+            .child(
+                div()
+                    .text_sm()
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(rail::accent())
+                    .child("ROASTRO"),
+            )
+            .child(
+                div()
+                    .id("status")
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py_1()
+                    .rounded_full()
+                    .bg(chart::faded(color, 0.15))
+                    .text_xs()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(color)
+                    .children(
+                        st.recording()
+                            .then(|| div().size(px(8.)).rounded_full().bg(color)),
+                    )
+                    .child(status.to_uppercase()),
+            )
+            .children(coffee.map(|c| div().text_sm().text_color(white(0.85)).child(c)))
+            .children(green.map(|g| {
+                div()
+                    .text_sm()
+                    .text_color(white(0.5))
+                    .child(format!("{} kg", kilograms(g)))
+            }))
+            .child(div().flex_1())
+            .child(div().text_sm().text_color(white(0.5)).child(reference))
+            .child(
+                div()
+                    .id("big-numbers")
+                    .test_support()
+                    .flex()
+                    .items_center()
+                    .gap_2()
+                    .px_3()
+                    .py_1()
+                    .rounded_full()
+                    .border_1()
+                    .cursor_pointer()
+                    .text_xs()
+                    .when(big, |d| {
+                        d.border_color(chart::faded(rail::accent(), 0.5))
+                            .bg(chart::faded(rail::accent(), 0.15))
+                            .text_color(rail::accent())
+                    })
+                    .when(!big, |d| d.border_color(white(0.1)).text_color(white(0.6)))
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.big = !this.big;
+                        cx.notify();
+                    }))
+                    .child(
+                        div()
+                            .w(px(24.))
+                            .h(px(14.))
+                            .rounded_full()
+                            .p(px(2.))
+                            .flex()
+                            .when(big, |d| d.justify_end().bg(rail::accent()))
+                            .when(!big, |d| d.bg(white(0.2)))
+                            .child(div().size(px(10.)).rounded_full().bg(rgb(0x0000_0000))),
+                    )
+                    .child("Big numbers"),
+            )
+    }
 }
 
 impl Render for RoastScreen {
-    #[allow(clippy::too_many_lines)] // the screen's layout, read top to bottom
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.sync_weight(window, cx);
         let hover_overlay = if self.menu.is_none() {
             self.hover_overlay()
         } else {
             None
         };
         let menu_overlay = self.menu_overlay(cx);
-        let st = &self.state;
-        let last = st.last();
-        let value = |k: &str| last.and_then(|s| s.values.get(k).copied());
-        let ref_bt = st.reference.as_ref().and_then(|r| {
-            let now = st.roast_s(st.now()?);
-            r.points
-                .iter()
-                .min_by(|a, b| (a.0 - now).abs().total_cmp(&(b.0 - now).abs()))
-                .and_then(|p| p.1)
-        });
-        let bt_sub = match (value("bt"), ref_bt, st.roast.is_some()) {
-            (Some(b), Some(r), true) => Some(format!("ref {r:.1}  {:+.1}", b - r)),
-            _ => None,
-        };
-        let status: SharedString = if !st.connected() {
-            st.link
-                .as_ref()
-                .and_then(|l| l.error.clone())
-                .map_or("Connecting to the PLC…".into(), |e| {
-                    format!("PLC disconnected: {e}").into()
-                })
-        } else if st.recording() {
-            "Recording".into()
-        } else if st.roast.is_some() {
-            "Done".into()
-        } else {
-            "Waiting for charge".into()
-        };
-        let time = if st.roast.is_some() {
-            let end = st.event_at(EventKind::Drop).or(st.now());
-            end.map_or_else(|| "–:––".into(), |at| clock(st.roast_s(at)))
-        } else {
-            "–:––".into()
-        };
-        let coffee = st
-            .roast
-            .as_ref()
-            .and_then(|r| r.coffee.as_ref().map(|c| c.name.clone()));
-        let reference = st.roast.as_ref().and_then(|r| {
-            r.reference
-                .as_ref()
-                .map(|r| format!("Reference: Roast #{}", r.number))
-        });
-        let next = st.next_event();
-        let recording = st.recording();
-
-        // Phases bar and Development time ratio.
-        let phases = st
-            .roast
-            .as_ref()
-            .map(|r| r.metrics.phases.clone())
-            .unwrap_or_default();
-        let dtr = st
-            .roast
-            .as_ref()
-            .and_then(|r| r.metrics.development_time_ratio);
-        let phase_bar = div()
-            .flex()
-            .h(px(8.))
-            .w_full()
-            .rounded_full()
-            .overflow_hidden()
-            .bg(white(0.06))
-            .children(phases.iter().map(|p| {
-                let color = match p.kind {
-                    "drying" => chart::et(),
-                    "maillard" => chart::bt(),
-                    _ => chart::ror(),
-                };
-                #[allow(clippy::cast_possible_truncation)]
-                div()
-                    .h_full()
-                    .w(relative(p.ratio as f32))
-                    .bg(faded(color, 0.7))
-            }));
-
-        // Timeline: events and notes in roast order.
-        let mut timeline: Vec<(Millis, String, Hsla)> = Vec::new();
-        if let Some(r) = &st.roast {
-            for e in &r.events {
-                let kind = e.kind.parse::<EventKind>().ok();
-                let name = kind.map_or(e.kind, chart::label);
-                let bt_then = st
-                    .samples
-                    .iter()
-                    .min_by_key(|s| (s.at - e.at).abs())
-                    .and_then(|s| s.values.get("bt").copied());
-                timeline.push((
-                    e.at,
-                    format!("{}  {name}  {}°", clock(st.roast_s(e.at)), fmt1(bt_then)),
-                    chart::bt(),
-                ));
-            }
-            for n in &r.notes {
-                timeline.push((
-                    n.at,
-                    format!("{}  “{}”", clock(st.roast_s(n.at)), n.text),
-                    white(0.85),
-                ));
-            }
-        }
-        timeline.sort_by_key(|t| t.0);
-
-        let next_label = next.map(|k| match k {
-            EventKind::Charge => "Charge".to_owned(),
-            EventKind::Drop => "Drop".to_owned(),
-            k => format!("Mark {}", chart::label(k)),
-        });
-
+        let chart = div()
+            .id("chart")
+            .test_support()
+            .flex_1()
+            .min_w_0()
+            .p_4()
+            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
+                this.pointer_moved(ev.position, cx);
+            }))
+            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                if !hovered {
+                    this.hover = None;
+                    cx.notify();
+                }
+            }))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                    this.pointer_down(ev.position, window, cx);
+                }),
+            )
+            .child(chart::chart(
+                &self.state,
+                self.geometry.clone(),
+                self.hover.map(|h| h.1),
+            ));
         div()
             .id("roast-screen")
             .size_full()
             .flex()
+            .flex_col()
             .bg(rgb(0x000b_0c0e))
             .text_color(white(0.92))
             .children(hover_overlay)
             .children(menu_overlay)
+            .child(self.header(cx))
+            .children(self.big.then(|| self.strip()))
             .child(
                 div()
                     .flex_1()
+                    .min_h_0()
                     .flex()
-                    .flex_col()
-                    .p_4()
-                    .gap_2()
-                    .child(
-                        div()
-                            .flex()
-                            .gap_4()
-                            .items_center()
-                            .child(
-                                div()
-                                    .text_sm()
-                                    .font_weight(FontWeight::BOLD)
-                                    .text_color(chart::bt())
-                                    .child("ROASTRO"),
-                            )
-                            .child(
-                                div()
-                                    .id("status")
-                                    .text_sm()
-                                    .text_color(white(0.7))
-                                    .child(status),
-                            )
-                            .children(coffee.map(|c| div().text_sm().child(c)))
-                            .child(div().flex_1())
-                            .children(
-                                reference.map(|r| div().text_sm().text_color(white(0.5)).child(r)),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .id("chart")
-                            .test_support()
-                            .flex_1()
-                            .w_full()
-                            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
-                                this.pointer_moved(ev.position, cx);
-                            }))
-                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
-                                if !hovered {
-                                    this.hover = None;
-                                    cx.notify();
-                                }
-                            }))
-                            .on_mouse_down(
-                                MouseButton::Left,
-                                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
-                                    this.pointer_down(ev.position, window, cx);
-                                }),
-                            )
-                            .child(chart::chart(
-                                st,
-                                self.geometry.clone(),
-                                self.hover.map(|h| h.1),
-                            )),
-                    ),
+                    .child(chart)
+                    .child(self.rail(cx)),
             )
-            .child(
-                div()
-                    .w(px(360.))
-                    .h_full()
-                    .flex()
-                    .flex_col()
-                    .gap_4()
-                    .p_4()
-                    .bg(rgb(0x0012_1317))
-                    .border_l_1()
-                    .border_color(white(0.08))
-                    .child(readout("ROAST TIME", time, white(0.95), true, None))
-                    .child(readout(
-                        "BEAN TEMP · BT °C",
-                        fmt1(value("bt")),
-                        chart::bt(),
-                        true,
-                        bt_sub,
-                    ))
-                    .child(
-                        div()
-                            .flex()
-                            .gap_6()
-                            .child(readout(
-                                "RoR °C/min",
-                                fmt1(
-                                    last.and_then(|s| s.ror)
-                                        .filter(|_| st.event_at(EventKind::TurningPoint).is_some()),
-                                ),
-                                chart::ror(),
-                                false,
-                                None,
-                            ))
-                            .child(readout(
-                                "AIR TEMP · ET °C",
-                                fmt1(value("et")),
-                                chart::et(),
-                                false,
-                                None,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_6()
-                            .child(readout(
-                                "AIR %",
-                                fmt0(value("fan")),
-                                chart::air(),
-                                false,
-                                None,
-                            ))
-                            .child(readout(
-                                "GAS %",
-                                fmt0(value("gas_fb")),
-                                chart::gas(),
-                                false,
-                                None,
-                            )),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .child(
-                                div()
-                                    .flex()
-                                    .justify_between()
-                                    .text_xs()
-                                    .text_color(white(0.45))
-                                    .child("PHASES")
-                                    .child(format!(
-                                        "DTR {}",
-                                        dtr.map_or("—".to_owned(), |d| format!(
-                                            "{:.1}%",
-                                            d * 100.0
-                                        ))
-                                    )),
-                            )
-                            .child(phase_bar),
-                    )
-                    .children(next.zip(next_label).map(|(kind, label)| {
-                        Button::new("next-event")
-                            .primary()
-                            .label(label)
-                            .on_click(cx.listener(move |this, _, _, cx| this.press(kind, cx)))
-                    }))
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .children(
-                                (recording
-                                    && st.event_at(EventKind::FirstCrack).is_some()
-                                    && st.event_at(EventKind::SecondCrack).is_none())
-                                .then(|| {
-                                    Button::new("second-crack").label("Second crack").on_click(
-                                        cx.listener(|this, _, _, cx| {
-                                            this.press(EventKind::SecondCrack, cx);
-                                        }),
-                                    )
-                                }),
-                            )
-                            .children((recording && next != Some(EventKind::Drop)).then(|| {
-                                Button::new("drop").label("Drop").on_click(
-                                    cx.listener(|this, _, _, cx| this.press(EventKind::Drop, cx)),
-                                )
-                            })),
-                    )
-                    .children(self.message.clone().map(|m| {
-                        div()
-                            .id("message")
-                            .text_xs()
-                            .text_color(rgb(0x00f8_7171))
-                            .child(m)
-                    }))
-                    .child(div().text_xs().text_color(white(0.45)).child("TIMELINE"))
-                    .child(
-                        div()
-                            .id("timeline")
-                            .flex_1()
-                            .flex()
-                            .flex_col()
-                            .gap_1()
-                            .overflow_y_scroll()
-                            .children(timeline.into_iter().map(|(_, text, color)| {
-                                div().text_sm().text_color(color).child(text)
-                            })),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(Input::new(&self.note).id("note").flex_1())
-                            .child(Button::new("add-note").label("Add note").on_click(
-                                cx.listener(|this, _, window, cx| this.add_note(window, cx)),
-                            )),
-                    ),
-            )
+    }
+}
+
+#[cfg(test)]
+mod weight_tests {
+    use super::{grams, kilograms};
+
+    #[test]
+    fn reads_kilograms_as_typed() {
+        assert_eq!(grams("4.25"), Some(Some(4250)));
+        assert_eq!(grams(" 4,1 "), Some(Some(4100)));
+        assert_eq!(grams(""), Some(None), "empty clears");
+        assert_eq!(grams("abc"), None);
+        assert_eq!(grams("-1"), None);
+        assert_eq!(kilograms(4250), "4.250");
     }
 }
 
@@ -929,7 +869,7 @@ mod tests {
         AppContext, Bounds, Point, TestAppContext, WindowBounds, WindowOptions, px, size,
     };
     use roastro::engine::{Edit, Request};
-    use roastro::wire::{EventOut, Live, MetricsOut, RoastDoc, SampleOut};
+    use roastro::wire::{EventOut, Live, MetricsOut, NoteOut, RoastDoc, SampleOut};
     use tokio::sync::mpsc;
     use uuid::Uuid;
 
@@ -1122,6 +1062,134 @@ mod tests {
             cx.update(|cx| screen.read(cx).menu.is_none()),
             "the menu closes after an action"
         );
+    }
+
+    fn open(
+        cx: &mut TestAppContext,
+    ) -> (
+        gpui_kit::AnyWindowHandle,
+        gpui_kit::Entity<RoastScreen>,
+        mpsc::Receiver<Request>,
+    ) {
+        cx.update(gpui_kit::init);
+        let (tx, mut rx) = mpsc::channel(16);
+        let (handle, screen) = cx.update(|cx| {
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds {
+                    origin: Point::default(),
+                    size: size(px(1440.), px(900.)),
+                })),
+                ..Default::default()
+            };
+            gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| RoastScreen::new(Engine(tx), 1.0, window, cx))
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        let _subscribe = rx.try_recv();
+        (handle, screen, rx)
+    }
+
+    #[gpui_kit::test]
+    fn the_rail_undoes_marks_and_notes_and_records_the_weight(cx: &mut TestAppContext) {
+        let (handle, screen, mut rx) = open(cx);
+        let id = Uuid::now_v7();
+        let note = Uuid::now_v7();
+        let mut roast = recording_roast(id);
+        roast.events.push(EventOut {
+            kind: "dry_end",
+            at: 2000,
+            source: "manual",
+            original_at: None,
+        });
+        roast.notes.push(NoteOut {
+            id: note,
+            at: 2000,
+            text: "yellow".into(),
+        });
+        cx.update(|cx| {
+            screen.update(cx, |s, cx| {
+                s.apply(&Live::Roast(roast.clone()), cx);
+                let values = HashMap::from([("bt".to_owned(), 150.0)]);
+                s.apply(
+                    &Live::Sample(SampleOut {
+                        at: 3000,
+                        values,
+                        ror: None,
+                    }),
+                    cx,
+                );
+            });
+        });
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("unmark-charge").is_none(),
+                "Charge can only be moved"
+            );
+            window.click("unmark-dry_end", cx);
+            window.click("remove-note-1", cx);
+            window.click("drop", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let mut seen = Vec::new();
+        while let Ok(req) = rx.try_recv() {
+            seen.push(match req {
+                Request::Edit(Edit::DeleteEvent(_, kind, _)) => format!("unmark {kind}"),
+                Request::Edit(Edit::DeleteNote(_, n, _)) => format!("remove note {}", n == note),
+                Request::Drop(_) => "drop".into(),
+                other => name(&other).into(),
+            });
+        }
+        assert_eq!(seen, ["unmark dry_end", "remove note true", "drop"]);
+
+        roast.state = "done";
+        roast.roasted_weight_g = Some(4250);
+        cx.update(|cx| screen.update(cx, |s, cx| s.apply(&Live::Roast(roast), cx)));
+        cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+            .unwrap();
+        assert_eq!(
+            cx.update(|cx| screen.read(cx).weight.read(cx).value().to_string()),
+            "4.250",
+            "the stored weight shows once done"
+        );
+
+        let other = recording_roast(Uuid::now_v7());
+        let other = RoastDoc {
+            state: "done",
+            ..other
+        };
+        cx.update(|cx| screen.update(cx, |s, cx| s.apply(&Live::Roast(other), cx)));
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("roasted-weight", cx);
+            window.input("4,1", cx);
+            window.click("save-weight", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        match rx.try_recv() {
+            Ok(Request::Edit(Edit::PatchRoast(_, patch, _))) => {
+                assert_eq!(patch.roasted_weight_g, Some(Some(4100)));
+            }
+            _ => panic!("Save did not patch the roasted weight"),
+        }
+    }
+
+    #[gpui_kit::test]
+    fn big_numbers_moves_the_readouts_to_a_strip(cx: &mut TestAppContext) {
+        let (handle, screen, _rx) = open(cx);
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("big-numbers-strip").is_none());
+            window.click("big-numbers", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("big-numbers-strip").is_some());
+        })
+        .unwrap();
+        assert!(cx.update(|cx| screen.read(cx).big));
     }
 
     fn name(req: &Request) -> &'static str {

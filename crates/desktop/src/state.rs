@@ -18,6 +18,8 @@ pub struct Reference {
     pub id: Uuid,
     /// Roast seconds, BT, ET.
     pub points: Vec<(f64, Option<f64>, Option<f64>)>,
+    /// Its events after Charge, in roast seconds.
+    pub events: Vec<(EventKind, f64)>,
 }
 
 /// The live screen's state.
@@ -200,21 +202,61 @@ impl LiveState {
         }
     }
 
-    /// Stores a fetched reference curve, aligned on its own Charge.
-    pub fn set_reference(&mut self, id: Uuid, charge_at: Millis, columns: &Columns) {
+    /// Stores a fetched reference roast, aligned on its own Charge. A roast
+    /// without a Charge has no curve to align and is ignored.
+    pub fn set_reference(&mut self, roast: &RoastDoc, columns: &Columns) {
+        let Some(charge_at) = roast.charge_at else {
+            return;
+        };
+        #[allow(clippy::cast_precision_loss)] // milliseconds well inside f64's range
+        let s = |at: Millis| (at - charge_at) as f64 * self.time_scale / 1000.0;
         let bt = columns.values.get("bt");
         let et = columns.values.get("et");
-        #[allow(clippy::cast_precision_loss)]
         let points = columns
             .at
             .iter()
             .enumerate()
-            .map(|(i, &at)| {
-                let s = (at - charge_at) as f64 * self.time_scale / 1000.0;
-                (s, bt.and_then(|c| c[i]), et.and_then(|c| c[i]))
-            })
+            .map(|(i, &at)| (s(at), bt.and_then(|c| c[i]), et.and_then(|c| c[i])))
             .collect();
-        self.reference = Some(Reference { id, points });
+        let events = roast
+            .events
+            .iter()
+            .filter_map(|e| Some((e.kind.parse::<EventKind>().ok()?, s(e.at))))
+            .filter(|(kind, _)| *kind != EventKind::Charge)
+            .collect();
+        self.reference = Some(Reference {
+            id: roast.id,
+            points,
+            events,
+        });
+    }
+
+    /// The reference's events still ahead of a roast being recorded and not
+    /// marked yet, in roast seconds: what the timeline greys out below "now".
+    #[must_use]
+    pub fn upcoming(&self) -> Vec<(EventKind, f64)> {
+        let (Some(reference), Some(now)) = (&self.reference, self.now()) else {
+            return Vec::new();
+        };
+        if !self.recording() {
+            return Vec::new();
+        }
+        let now = self.roast_s(now);
+        reference
+            .events
+            .iter()
+            .copied()
+            .filter(|(kind, s)| *s > now && self.event_at(*kind).is_none())
+            .collect()
+    }
+
+    /// Bean temperature at an instant: the nearest reading's.
+    #[must_use]
+    pub fn bt_at(&self, at: Millis) -> Option<f64> {
+        self.samples
+            .iter()
+            .min_by_key(|s| (s.at - at).abs())
+            .and_then(|s| s.values.get("bt").copied())
     }
 
     /// Whether readings are arriving.
@@ -361,19 +403,43 @@ mod tests {
     }
 
     #[test]
-    fn aligns_the_reference_on_its_charge() {
+    fn aligns_the_reference_on_its_charge_and_greys_what_is_ahead() {
         let mut s = LiveState::new(1.0);
         let columns = Columns {
             at: vec![10_000, 70_000],
             ror: vec![None, None],
             values: [("bt".to_owned(), vec![Some(200.0), Some(90.0)])].into(),
         };
-        s.set_reference(Uuid::now_v7(), 10_000, &columns);
-        let r = s.reference.unwrap();
+        let reference = roast(
+            Uuid::now_v7(),
+            "done",
+            &[
+                ("charge", 10_000),
+                ("dry_end", 250_000),
+                ("first_crack", 490_000),
+                ("drop", 610_000),
+            ],
+        );
+        s.set_reference(&reference, &columns);
+        let r = s.reference.clone().unwrap();
         assert_eq!(
             r.points,
             [(0.0, Some(200.0), None), (60.0, Some(90.0), None)]
         );
+        assert_eq!(r.events.len(), 3, "Charge is the origin, not an event");
+
+        s.apply(&Live::Roast(roast(
+            Uuid::now_v7(),
+            "recording",
+            &[("charge", 0), ("dry_end", 230_000)],
+        )));
+        s.apply(&sample(300_000, 170.0));
+        assert_eq!(
+            s.upcoming(),
+            [(EventKind::FirstCrack, 480.0), (EventKind::Drop, 600.0)],
+            "marked and past events drop out"
+        );
+        assert_eq!(s.bt_at(299_000), Some(170.0));
     }
 }
 
