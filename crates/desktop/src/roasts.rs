@@ -363,7 +363,7 @@ fn fall_color(fall: Option<f64>) -> Hsla {
 }
 
 /// "08:05" in the computer's time zone.
-fn time_of_day(at: Millis) -> String {
+pub fn time_of_day(at: Millis) -> String {
     jiff::Timestamp::from_millisecond(at)
         .map(|t| {
             t.to_zoned(jiff::tz::TimeZone::system())
