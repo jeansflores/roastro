@@ -21,6 +21,7 @@ use anyhow::Context as _;
 use plc::{Client, Poller};
 use recorder::{Millis, Rules};
 use regmap::Map;
+pub use store::RoastId;
 use store::Store;
 use tokio::sync::{broadcast, mpsc};
 

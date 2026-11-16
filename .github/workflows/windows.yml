@@ -1,0 +1,35 @@
+# Builds and checks the Windows desktop app, and publishes the .exe as an
+# artifact. Windows builds come from CI (ADR 0003).
+name: windows
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+jobs:
+  desktop:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: 1.99.1
+      - uses: Swatinem/rust-cache@v2
+      - name: Build (release)
+        run: cargo build --release --locked -p desktop
+      - name: Tests
+        run: cargo test --locked --workspace
+      - name: Headless UI tests
+        run: cargo test --locked -p desktop --features ui-test
+      - name: Smoke run (built-in simulator, 20 s)
+        shell: pwsh
+        run: |
+          $db = Join-Path $env:RUNNER_TEMP 'smoke.db'
+          $p = Start-Process -FilePath target\release\roastro-desktop.exe -ArgumentList '--simulator','--db',$db,'--exit-after','20' -PassThru
+          if (-not $p.WaitForExit(90000)) { Stop-Process $p; throw "did not exit in 90 s" }
+          if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roastro-desktop-windows
+          path: target/release/roastro-desktop.exe
