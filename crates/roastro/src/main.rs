@@ -67,11 +67,12 @@ async fn main() -> anyhow::Result<()> {
     };
     let map = Map::load(&args.map).with_context(|| format!("loading {}", args.map.display()))?;
     let running = roastro::start(roastro::Config {
-        url: args.url,
+        url: Some(args.url),
         map,
         db,
         interval: Duration::from_millis(args.interval_ms),
         time_scale: args.time_scale,
+        demo: None,
     })?;
 
     let port = args.http.port();

@@ -2,7 +2,9 @@
 //! No GPUI here, so every rule is a plain unit test.
 
 use roast::EventKind;
-use roastro::wire::{Columns, Link, LinkState, Live, NextRoastOut, RoastDoc, SampleOut};
+use roastro::wire::{
+    Columns, Link, LinkState, Live, MachineOut, NextRoastOut, RoastDoc, SampleOut,
+};
 use uuid::Uuid;
 
 /// Epoch milliseconds.
@@ -25,6 +27,8 @@ pub struct Reference {
 /// The live screen's state.
 #[derive(Debug, Clone)]
 pub struct LiveState {
+    /// The machine in use, once known.
+    pub machine: Option<MachineOut>,
     /// The PLC link, once known.
     pub link: Option<Link>,
     /// What the operator prepared.
@@ -44,6 +48,7 @@ impl LiveState {
     #[must_use]
     pub fn new(time_scale: f64) -> Self {
         Self {
+            machine: None,
             link: None,
             next: None,
             roast: None,
@@ -57,6 +62,7 @@ impl LiveState {
     pub fn apply(&mut self, msg: &Live) {
         match msg {
             Live::Snapshot(s) => {
+                self.machine = Some(s.machine.clone());
                 self.link = Some(s.link.clone());
                 self.next = Some(s.next_roast.clone());
                 self.roast = s.roast.clone().filter(|r| r.state != "discarded");
@@ -85,6 +91,7 @@ impl LiveState {
                 self.roast = Some(doc.clone());
             }
             Live::NextRoast(n) => self.next = Some(n.clone()),
+            Live::Machine(m) => self.machine = Some(m.clone()),
             Live::Link(l) => self.link = Some(l.clone()),
         }
     }
@@ -317,6 +324,13 @@ mod tests {
 
     fn snapshot() -> Live {
         Live::Snapshot(Snapshot {
+            machine: MachineOut {
+                name: "Caloratto".into(),
+                address: "tcp://127.0.0.1:5502".into(),
+                model: "simulator".into(),
+                model_title: "Roastro simulator".into(),
+                demo: false,
+            },
             link: Link {
                 state: LinkState::Connected,
                 since: 0,

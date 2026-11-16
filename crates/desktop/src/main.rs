@@ -41,19 +41,20 @@ use crate::view::Engine;
 #[derive(Debug, Parser)]
 #[command(about = "Roastro: the live roast screen")]
 struct Args {
-    /// PLC address (real machine: tcp://192.168.5.11:502).
-    #[arg(long, default_value = "tcp://127.0.0.1:5502")]
-    url: String,
+    /// PLC address to read instead of the machine set up in the app
+    /// (development and diagnostics), e.g. tcp://192.168.5.11:502.
+    #[arg(long)]
+    url: Option<String>,
     /// Register map (default: the simulator's, built in).
     #[arg(long)]
     map: Option<PathBuf>,
     /// Database file (default: Roastro/roastro.db in the local app data folder).
     #[arg(long)]
     db: Option<PathBuf>,
-    /// Run the simulator inside the app (demo); implies --url on --sim-port.
+    /// Read the built-in simulator instead of the machine set up in the app.
     #[arg(long)]
     simulator: bool,
-    /// Port for the built-in simulator.
+    /// Port for the built-in simulator (also the Demo machine's).
     #[arg(long, default_value_t = 5502)]
     sim_port: u16,
     /// The simulator's speed, so roast-time rules and the clock run at simulated speed.
@@ -84,27 +85,42 @@ fn main() -> anyhow::Result<()> {
         Some(db) => db,
         None => roastro::default_db()?,
     };
-    let url = if args.simulator {
-        format!("tcp://127.0.0.1:{}", args.sim_port)
-    } else {
-        args.url
-    };
+    // The built-in simulator, started once, when the Demo machine (or
+    // --simulator) needs it.
+    let started: Arc<tokio::sync::OnceCell<String>> = Arc::new(tokio::sync::OnceCell::new());
+    let port = args.sim_port;
+    let demo: roastro::DemoHook = Arc::new(move || {
+        let started = started.clone();
+        Box::pin(async move {
+            started
+                .get_or_try_init(|| async {
+                    let map = Arc::new(roastro::machine::model_map(roastro::machine::SIMULATOR)?);
+                    simulator::start(map, time_scale, port)
+                        .await
+                        .context("starting the built-in simulator")?;
+                    Ok::<_, anyhow::Error>(format!("tcp://127.0.0.1:{port}"))
+                })
+                .await
+                .cloned()
+        })
+    });
 
     // Tokio runs the PLC poller (and the simulator) on its own threads; it
     // lives as long as the process.
     let runtime = tokio::runtime::Runtime::new()?;
     let running = runtime.block_on(async {
-        if args.simulator {
-            simulator::start(Arc::new(map.clone()), time_scale, args.sim_port)
-                .await
-                .context("starting the built-in simulator")?;
-        }
+        let url = if args.simulator {
+            Some(demo().await?)
+        } else {
+            args.url
+        };
         roastro::start(roastro::Config {
             url,
             map,
             db,
             interval: Duration::from_secs(1),
             time_scale,
+            demo: Some(demo),
         })
     })?;
     std::thread::Builder::new()

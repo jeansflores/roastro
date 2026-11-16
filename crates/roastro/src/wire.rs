@@ -26,6 +26,8 @@ pub enum Live {
     Link(Link),
     /// The Next roast changed.
     NextRoast(NextRoastOut),
+    /// The machine in use changed, or its settings.
+    Machine(MachineOut),
 }
 
 impl Live {
@@ -40,6 +42,8 @@ impl Live {
 /// The live screen's starting point.
 #[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
+    /// The machine in use.
+    pub machine: MachineOut,
     /// The PLC link.
     pub link: Link,
     /// What the operator prepared for the next roast.
@@ -88,6 +92,54 @@ pub struct Link {
     pub retry_at: Option<Millis>,
     /// What to check, in plain words, while down.
     pub advice: Option<String>,
+}
+
+/// The machine Roastro reads.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct MachineOut {
+    pub name: String,
+    /// `tcp://host:port`; empty until set up (and on the Demo machine).
+    pub address: String,
+    pub model: String,
+    pub model_title: String,
+    /// The built-in simulator: its roasts stay out of the real history.
+    pub demo: bool,
+}
+
+impl From<store::Machine> for MachineOut {
+    fn from(m: store::Machine) -> Self {
+        Self {
+            model_title: crate::machine::model_title(&m.model).to_owned(),
+            name: m.name,
+            address: m.address,
+            model: m.model,
+            demo: m.demo,
+        }
+    }
+}
+
+/// Setting up the machine, or testing settings before saving them.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct MachineIn {
+    #[serde(default)]
+    pub name: String,
+    /// As typed: `192.168.5.11`, `192.168.5.11:502` or `tcp://…`.
+    #[serde(default)]
+    pub address: String,
+    #[serde(default)]
+    pub model: String,
+    /// Use the Demo machine instead; the rest is ignored.
+    #[serde(default)]
+    pub demo: bool,
+}
+
+/// What one test read brought back.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct TestOut {
+    /// Every register-map point by name.
+    pub values: BTreeMap<String, f64>,
+    /// How long the read took, ms.
+    pub latency_ms: u64,
 }
 
 /// A stretch when the machine stopped answering after having answered.

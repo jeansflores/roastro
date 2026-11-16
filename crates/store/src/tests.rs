@@ -438,3 +438,55 @@ fn logs_link_drops_newest_first() {
         "an ended drop keeps its first end"
     );
 }
+
+#[test]
+fn sets_up_the_machine_and_keeps_demo_roasts_apart() {
+    let dir = std::env::temp_dir().join(format!("roastro-machine-{}", Uuid::now_v7()));
+    let path = dir.join("roastro.db");
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut st = Store::open(&path).unwrap();
+    let first = st.machine().unwrap();
+    assert_eq!(
+        (first.address.as_str(), first.demo),
+        ("", false),
+        "not set up"
+    );
+    let real_roast = st.start_roast(0, Source::Manual, &[]).unwrap();
+
+    let real = st
+        .save_machine("Caloratto", "tcp://192.168.5.11:502", "caloratto-2.0")
+        .unwrap();
+    assert_eq!(real.id, first.id, "the same real machine, set up");
+    let demo = st.use_demo("simulator").unwrap();
+    assert!(demo.demo);
+    assert_eq!(
+        st.roasts(&RoastQuery::default(), 10).unwrap(),
+        [],
+        "demo history is apart"
+    );
+    let demo_roast = st.start_roast(1_000, Source::Manual, &[]).unwrap();
+    assert_eq!(
+        st.roast(demo_roast).unwrap().number,
+        1,
+        "numbered on its own"
+    );
+    drop(st);
+
+    let mut st = Store::open(&path).unwrap();
+    assert_eq!(
+        st.machine().unwrap().id,
+        demo.id,
+        "the machine in use survives a restart"
+    );
+    st.save_machine("Caloratto", "tcp://192.168.5.12:502", "caloratto-2.0")
+        .unwrap();
+    let listed: Vec<_> = st
+        .roasts(&RoastQuery::default(), 10)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(listed, [real_roast], "back to the real history");
+    drop(st);
+    std::fs::remove_dir_all(dir).unwrap();
+}

@@ -35,7 +35,6 @@ pub struct ApiError {
 
 impl ApiError {
     /// The stable error code, e.g. `roast_not_found`.
-    #[cfg(test)]
     #[must_use]
     pub fn code(&self) -> &'static str {
         self.code
