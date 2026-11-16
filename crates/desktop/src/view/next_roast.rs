@@ -18,8 +18,8 @@ use super::{RoastScreen, grams, kilograms, white};
 /// One option of a select: an id, or none.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Choice {
-    value: Option<Uuid>,
-    title: SharedString,
+    pub value: Option<Uuid>,
+    pub title: SharedString,
 }
 
 impl SelectItem for Choice {
@@ -132,7 +132,7 @@ fn done_typing(event: &InputEvent) -> bool {
 }
 
 /// "12 Nov", in the computer's time zone.
-fn date(at: i64) -> String {
+pub(crate) fn date(at: i64) -> String {
     jiff::Timestamp::from_millisecond(at)
         .map(|t| {
             t.to_zoned(jiff::tz::TimeZone::system())

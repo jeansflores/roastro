@@ -13,7 +13,11 @@ use gpui_kit::{
     div, px, rgb,
 };
 
+use uuid::Uuid;
+
 use crate::chart;
+use crate::roast_detail::{Back, RoastDetail};
+use crate::roasts::{OpenRoast, RoastsPage};
 use crate::state::LiveState;
 use crate::view::{Engine, RoastScreen, clock, fmt1, white};
 
@@ -22,6 +26,8 @@ use crate::view::{Engine, RoastScreen, clock, fmt1, white};
 pub enum Page {
     Live,
     Roasts,
+    /// One roast, opened from Roasts or after its Drop.
+    Roast,
     Coffees,
     Machine,
 }
@@ -32,7 +38,7 @@ impl Page {
     fn title(self) -> &'static str {
         match self {
             Self::Live => "Live roast",
-            Self::Roasts => "Roasts",
+            Self::Roasts | Self::Roast => "Roasts",
             Self::Coffees => "Coffees",
             Self::Machine => "Machine",
         }
@@ -41,7 +47,7 @@ impl Page {
     fn id(self) -> &'static str {
         match self {
             Self::Live => "live",
-            Self::Roasts => "roasts",
+            Self::Roasts | Self::Roast => "roasts",
             Self::Coffees => "coffees",
             Self::Machine => "machine",
         }
@@ -50,7 +56,7 @@ impl Page {
     fn icon(self) -> Icon {
         match self {
             Self::Live => Icon::new(Lucide::Flame),
-            Self::Roasts => Icon::new(Lucide::ChartSpline),
+            Self::Roasts | Self::Roast => Icon::new(Lucide::ChartSpline),
             Self::Coffees => Icon::new(Lucide::Coffee),
             Self::Machine => Icon::new(IconName::Cpu),
         }
@@ -59,11 +65,21 @@ impl Page {
 
 /// The window's root: the sidebar and the page on show.
 pub struct Shell {
+    engine: Engine,
+    time_scale: f64,
     page: Page,
     /// The live roast screen. It lives as long as the app, shown or not, so
     /// it keeps following the engine.
     live: Entity<RoastScreen>,
-    _live_changed: Subscription,
+    /// The list keeps its filters while other pages show.
+    roasts: Entity<RoastsPage>,
+    /// The roast opened last.
+    detail: Option<Entity<RoastDetail>>,
+    /// Whether a roast was recording at the last look: when that changes,
+    /// the list has a roast more.
+    was_recording: bool,
+    _subscriptions: Vec<Subscription>,
+    detail_back: Option<Subscription>,
 }
 
 impl Shell {
@@ -73,13 +89,49 @@ impl Shell {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let live = cx.new(|cx| RoastScreen::new(engine, time_scale, window, cx));
-        let live_changed = cx.observe(&live, |_, _, cx| cx.notify());
+        let live = cx.new(|cx| RoastScreen::new(engine.clone(), time_scale, window, cx));
+        let roasts = cx.new(|cx| RoastsPage::new(engine.clone(), time_scale, window, cx));
+        roasts.update(cx, RoastsPage::reload);
+        let subscriptions = vec![
+            cx.observe(&live, |this, live, cx| {
+                let recording = live.read(cx).state.recording();
+                if recording != this.was_recording {
+                    this.was_recording = recording;
+                    this.roasts.update(cx, RoastsPage::reload);
+                }
+                cx.notify();
+            }),
+            cx.subscribe_in(&roasts, window, |this, _, open: &OpenRoast, window, cx| {
+                this.open(open.0, window, cx);
+            }),
+            cx.subscribe_in(&live, window, |this, _, open: &OpenRoast, window, cx| {
+                this.open(open.0, window, cx);
+            }),
+        ];
         Self {
+            engine,
+            time_scale,
             page: Page::Live,
             live,
-            _live_changed: live_changed,
+            roasts,
+            detail: None,
+            was_recording: false,
+            _subscriptions: subscriptions,
+            detail_back: None,
         }
+    }
+
+    /// Opens one roast's page.
+    fn open(&mut self, id: Uuid, window: &mut Window, cx: &mut Context<Self>) {
+        let engine = self.engine.clone();
+        let time_scale = self.time_scale;
+        let detail = cx.new(|cx| RoastDetail::new(engine, id, time_scale, window, cx));
+        self.detail_back = Some(cx.subscribe(&detail, |this, _, _: &Back, cx| {
+            this.roasts.update(cx, RoastsPage::reload);
+            this.go(Page::Roasts, cx);
+        }));
+        self.detail = Some(detail);
+        self.go(Page::Roast, cx);
     }
 
     fn go(&mut self, page: Page, cx: &mut Context<Self>) {
@@ -127,7 +179,7 @@ impl Shell {
                     .flex_col()
                     .gap_1()
                     .children(Page::NAV.map(|page| {
-                        let on = self.page == page;
+                        let on = self.page.id() == page.id();
                         div()
                             .id(SharedString::from(format!("nav-{}", page.id())))
                             .test_support()
@@ -172,7 +224,7 @@ impl Shell {
             .border_r_1()
             .border_color(white(0.08))
             .children(Page::NAV.map(|page| {
-                let on = self.page == page;
+                let on = self.page.id() == page.id();
                 div()
                     .id(SharedString::from(format!("rail-{}", page.id())))
                     .test_support()
@@ -288,7 +340,6 @@ impl Shell {
     /// A page that is not built yet: says what it will hold.
     fn coming(page: Page) -> AnyElement {
         let what = match page {
-            Page::Roasts => "Every roast, with filters by coffee and date, and its curve.",
             Page::Coffees => "Your green coffees, their lots and how they roast.",
             _ => "The machine, its connection and its readings.",
         };
@@ -308,6 +359,47 @@ impl Shell {
             )
             .child(div().text_color(white(0.55)).child(what))
             .into_any_element()
+    }
+}
+
+impl Shell {
+    /// The roast being recorded, pinned above the list: one click to Live.
+    fn recording_row(st: &LiveState, cx: &mut Context<Self>) -> impl IntoElement {
+        let roast = st.roast.as_ref();
+        div()
+            .id("recording-row")
+            .test_support()
+            .flex()
+            .items_center()
+            .gap_3()
+            .mx_6()
+            .mt_4()
+            .px_4()
+            .py_2()
+            .rounded_lg()
+            .border_1()
+            .border_color(chart::faded(chart::bt(), 0.45))
+            .bg(chart::faded(chart::bt(), 0.08))
+            .cursor_pointer()
+            .on_click(cx.listener(|this, _, _, cx| this.go(Page::Live, cx)))
+            .child(div().size(px(8.)).rounded_full().bg(chart::bt()))
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(format!(
+                "Roast #{} is recording",
+                roast.map_or(0, |r| r.number)
+            )))
+            .child(
+                div().text_color(white(0.6)).child(
+                    st.now()
+                        .map_or_else(String::new, |at| clock(st.roast_s(at))),
+                ),
+            )
+            .child(div().flex_1())
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(chart::bt())
+                    .child("Open the live roast"),
+            )
     }
 }
 
@@ -331,6 +423,17 @@ impl Render for Shell {
         let st = self.live.read(cx).state.clone();
         let page = match self.page {
             Page::Live => self.live.clone().into_any_element(),
+            Page::Roasts => div()
+                .size_full()
+                .flex()
+                .flex_col()
+                .children(st.recording().then(|| Self::recording_row(&st, cx)))
+                .child(div().flex_1().min_h_0().child(self.roasts.clone()))
+                .into_any_element(),
+            Page::Roast => match &self.detail {
+                Some(detail) => detail.clone().into_any_element(),
+                None => self.roasts.clone().into_any_element(),
+            },
             other => Self::coming(other),
         };
         let nav = if self.page == Page::Live {
@@ -351,19 +454,26 @@ impl Render for Shell {
 
 #[cfg(all(test, feature = "ui-test"))]
 mod tests {
+    use std::collections::BTreeMap;
+
     use gpui_kit::test::TestWindowExt;
     use gpui_kit::{
-        AppContext, Bounds, Point, TestAppContext, WindowBounds, WindowOptions, px, size,
+        AnyWindowHandle, AppContext, Bounds, Entity, Point, TestAppContext, WindowBounds,
+        WindowOptions, px, size,
+    };
+    use roastro::engine::{Edit, Request};
+    use roastro::wire::{
+        Columns, EventOut, MetricsOut, NextRoastOut, RoastDoc, RoastPage, SummaryOut,
     };
     use tokio::sync::mpsc;
+    use uuid::Uuid;
 
     use super::{Page, Shell};
     use crate::view::Engine;
 
-    #[gpui_kit::test]
-    fn navigates_and_collapses_on_the_live_roast(cx: &mut TestAppContext) {
+    fn open(cx: &mut TestAppContext) -> (AnyWindowHandle, Entity<Shell>, mpsc::Receiver<Request>) {
         cx.update(gpui_kit::init);
-        let (tx, _rx) = mpsc::channel(16);
+        let (tx, rx) = mpsc::channel(64);
         let (handle, shell) = cx.update(|cx| {
             let options = WindowOptions {
                 window_bounds: Some(WindowBounds::Windowed(Bounds {
@@ -378,6 +488,92 @@ mod tests {
             .unwrap()
         });
         cx.run_until_parked();
+        (handle, shell, rx)
+    }
+
+    fn done_roast(id: Uuid, number: i64) -> RoastDoc {
+        let event = |kind, at| EventOut {
+            kind,
+            at,
+            source: "auto",
+            original_at: None,
+        };
+        RoastDoc {
+            id,
+            number,
+            state: "done",
+            charge_at: Some(1_000_000),
+            roasted_by: String::new(),
+            green_weight_g: Some(5000),
+            roasted_weight_g: None,
+            coffee: None,
+            reference: None,
+            events: vec![event("charge", 1_000_000), event("drop", 1_600_000)],
+            notes: Vec::new(),
+            metrics: MetricsOut {
+                duration_ms: Some(600_000),
+                phases: Vec::new(),
+                development_time_ratio: Some(0.2),
+                weight_loss_ratio: None,
+            },
+            summary: Some(SummaryOut {
+                drop_bt: Some(212.4),
+                ror_fall: Some(6.5),
+            }),
+        }
+    }
+
+    /// Answers what the pages ask, as the engine would, and says what they asked.
+    fn serve(rx: &mut mpsc::Receiver<Request>, roast: &RoastDoc) -> Vec<String> {
+        let mut seen = Vec::new();
+        while let Ok(req) = rx.try_recv() {
+            match req {
+                Request::Edit(Edit::Roasts(q, reply)) => {
+                    seen.push(format!("roasts q={:?} since={}", q.q, q.since.is_some()));
+                    let _ = reply.send(Ok(RoastPage {
+                        roasts: vec![roast.clone()],
+                        next_before: None,
+                    }));
+                }
+                Request::Edit(Edit::Coffees(_, reply)) => {
+                    let _ = reply.send(Ok(Vec::new()));
+                }
+                Request::Roast(_, reply) => {
+                    seen.push("roast".into());
+                    let _ = reply.send(Ok(roast.clone()));
+                }
+                Request::Samples(_, reply) => {
+                    let _ = reply.send(Ok(Columns {
+                        at: Vec::new(),
+                        ror: Vec::new(),
+                        values: BTreeMap::new(),
+                    }));
+                }
+                Request::Edit(Edit::GetNextRoast(reply)) => {
+                    let _ = reply.send(Ok(NextRoastOut {
+                        coffee_id: None,
+                        green_weight_g: Some(4500),
+                        roasted_by: "Ana".into(),
+                        reference_id: None,
+                        suggested_reference_id: None,
+                    }));
+                }
+                Request::Edit(Edit::PutNextRoast(next, _)) => {
+                    seen.push(format!(
+                        "next ref={} green={:?}",
+                        next.reference_id == Some(roast.id),
+                        next.green_weight_g
+                    ));
+                }
+                _ => {}
+            }
+        }
+        seen
+    }
+
+    #[gpui_kit::test]
+    fn navigates_and_collapses_on_the_live_roast(cx: &mut TestAppContext) {
+        let (handle, shell, _rx) = open(cx);
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
             assert!(
@@ -402,5 +598,72 @@ mod tests {
         })
         .unwrap();
         assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Live);
+    }
+
+    #[gpui_kit::test]
+    fn finds_a_roast_opens_it_and_comes_back(cx: &mut TestAppContext) {
+        let (handle, shell, mut rx) = open(cx);
+        let roast = done_roast(Uuid::now_v7(), 7);
+        assert_eq!(serve(&mut rx, &roast), ["roasts q=None since=false"]);
+
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("rail-roasts", cx);
+            window.render_frame(cx);
+            window.click("range-week", cx);
+            window.click("roast-search", cx);
+            window.input("7", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let asked = serve(&mut rx, &roast);
+        assert_eq!(
+            asked.first().map(String::as_str),
+            Some("roasts q=None since=true")
+        );
+        assert_eq!(
+            asked.last().map(String::as_str),
+            Some("roasts q=Some(\"7\") since=true")
+        );
+        cx.run_until_parked();
+
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("roast-7", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(serve(&mut rx, &roast), ["roast"]);
+        cx.run_until_parked();
+        serve(&mut rx, &roast); // its readings
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Roast);
+
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("use-as-reference", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        serve(&mut rx, &roast);
+        cx.run_until_parked();
+        assert_eq!(
+            serve(&mut rx, &roast),
+            ["next ref=true green=Some(4500)"],
+            "the reference changes, the rest is kept"
+        );
+
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("back", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Roasts);
+        assert_eq!(
+            serve(&mut rx, &roast).first().map(String::as_str),
+            Some("roasts q=Some(\"7\") since=true"),
+            "back to the list as it was, refreshed"
+        );
     }
 }

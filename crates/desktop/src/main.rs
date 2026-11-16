@@ -13,6 +13,8 @@
 
 mod assets;
 mod chart;
+mod roast_detail;
+mod roasts;
 mod shell;
 mod simulator;
 mod state;

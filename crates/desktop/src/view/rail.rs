@@ -226,7 +226,7 @@ fn pair(a: Figure, b: Figure) -> impl IntoElement {
 
 /// The phases bar with each phase's length and share, and the Development
 /// time ratio.
-fn phases(st: &LiveState) -> impl IntoElement {
+pub(crate) fn phases(st: &LiveState) -> impl IntoElement {
     let Some(roast) = st.roast.as_ref() else {
         return div();
     };
@@ -652,6 +652,14 @@ impl RoastScreen {
             .p_5()
             .border_t_1()
             .border_color(white(0.08))
+            .children(self.state.roast.as_ref().map(|r| {
+                let id = r.id;
+                Button::new("open-roast")
+                    .label(format!("Open Roast #{} in Roasts", r.number))
+                    .on_click(cx.listener(move |_, _, _, cx| {
+                        cx.emit(crate::roasts::OpenRoast(id));
+                    }))
+            }))
             .child(label("Roasted weight (kg)"))
             .child(
                 div()
