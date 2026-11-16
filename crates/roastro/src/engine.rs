@@ -538,6 +538,16 @@ mod tests {
             .map(|_| ())
         };
         assert_eq!(set(&mut e, "dry_end", 200), Err("event_in_future"));
+        NOW.store(100_500, Ordering::SeqCst);
+        assert_eq!(
+            set(&mut e, "second_crack", 100),
+            Ok(()),
+            "\"now\": just after the last reading"
+        );
+        assert_eq!(
+            edit(&mut e, |r| Edit::DeleteEvent(id, "second_crack".into(), r)).map(|_| ()),
+            Ok(())
+        );
         assert_eq!(
             set(&mut e, "dry_end", 70),
             Err("event_outside_samples"),

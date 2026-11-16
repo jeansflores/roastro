@@ -12,7 +12,7 @@ use store::{RoastId, RoastState, Store};
 use uuid::Uuid;
 
 /// A message on the live stream (`GET /api/live`): `{ "type", "data" }`.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum Live {
     /// Everything at once, on every (re)connect.
@@ -37,7 +37,7 @@ impl Live {
 }
 
 /// The live screen's starting point.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Snapshot {
     /// The PLC link.
     pub link: Link,
@@ -84,7 +84,7 @@ pub struct Link {
 }
 
 /// The Next roast.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NextRoastOut {
     /// Coffee to roast.
     pub coffee_id: Option<Uuid>,
@@ -121,7 +121,7 @@ impl NextRoastOut {
 }
 
 /// A roast for the UI: `GET /api/roasts/{id}` and the `roast` message.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RoastDoc {
     pub id: Uuid,
     pub number: i64,
@@ -138,13 +138,13 @@ pub struct RoastDoc {
     pub metrics: MetricsOut,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CoffeeRef {
     pub id: Uuid,
     pub name: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct ReferenceRef {
     pub id: Uuid,
     pub number: i64,
@@ -152,7 +152,7 @@ pub struct ReferenceRef {
     pub charge_at: Option<Millis>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct EventOut {
     pub kind: &'static str,
     pub at: Millis,
@@ -160,14 +160,14 @@ pub struct EventOut {
     pub original_at: Option<Millis>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct NoteOut {
     pub id: Uuid,
     pub at: Millis,
     pub text: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct MetricsOut {
     pub duration_ms: Option<Millis>,
     pub phases: Vec<PhaseOut>,
@@ -175,7 +175,7 @@ pub struct MetricsOut {
     pub weight_loss_ratio: Option<f64>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct PhaseOut {
     pub kind: &'static str,
     pub from: Millis,
@@ -320,7 +320,7 @@ pub fn samples_with_ror(
 }
 
 /// Readings in columns, as uPlot draws them (`GET /api/roasts/{id}/samples`).
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct Columns {
     pub at: Vec<Millis>,
     pub ror: Vec<Option<f64>>,
@@ -409,7 +409,7 @@ pub struct NextRoastIn {
 }
 
 /// A coffee.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct CoffeeOut {
     pub id: Uuid,
     pub name: String,
@@ -442,7 +442,7 @@ pub struct CoffeePatch {
 }
 
 /// `GET /api/roasts`: a page of roasts, newest first.
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct RoastPage {
     pub roasts: Vec<RoastDoc>,
     /// Pass as `?before=` for the next page; `null` on the last one.

@@ -158,6 +158,8 @@ impl Engine {
         let gap = Millis::try_from(self.ror.gap.as_millis()).unwrap_or(Millis::MAX);
         let ok = match (before, after) {
             (Some(b), Some(a)) => a - b <= gap || kind == Some(EventKind::Drop), // only Drop may sit inside a Gap
+            // Just after the last reading of a roast still recording: "now".
+            (Some(b), None) => at - b <= gap && self.recording.current() == Some(id),
             _ => false,
         };
         if ok {

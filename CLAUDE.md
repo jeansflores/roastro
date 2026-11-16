@@ -23,7 +23,8 @@ crates/store     SQLite: schema, embedded migrations on PRAGMA user_version, the
 crates/regmap    register map loading, validation, encode/decode
 crates/machine   machine facts from the manual (fan % → m³/h, drum % → rpm)
 crates/plc       async Modbus client by point name (timeouts, reconnect, loopback-only writes) and poller with backoff
-crates/roastro   the app: an engine thread owns recorder + store; axum API and live WebSocket on 127.0.0.1:8000 (Origin-checked, no PLC writes); the native UI is next
+crates/roastro   the core (lib): engine thread owns recorder + store, roastro::start; binary serves the axum API and live WebSocket on 127.0.0.1:8000 (Origin-checked, no PLC writes)
+crates/desktop   the native app (GPUI + gpui-component): engine in process, live roast screen; --simulator runs a built-in simulator
 crates/sim       PLC simulator: thermal model, interlocks, autopilot; binary serves Modbus TCP :5502 + HTTP panel :8080 on loopback
 crates/probe     line-based Modbus client (read, CSV, one-off writes)
 crates/monitor   terminal dashboard (ratatui) with live readings and keyboard commands
@@ -35,6 +36,8 @@ docs/            context, roadmap, ADRs, reference PDFs
 
 ```bash
 make test       # cargo test --workspace
+make ui-test    # the desktop app's headless UI tests (gpui-kit test support)
+make desktop    # the desktop app with its built-in simulator
 make lint       # cargo fmt --check, cargo clippy -D warnings
 make run        # Roastro recording from the local simulator into ./roastro.db, SPEED=10
 make run-sim    # simulator with autopilot, SPEED=10
