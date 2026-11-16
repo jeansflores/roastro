@@ -26,6 +26,9 @@ use uuid::Uuid;
 /// Readings kept for the live screen while waiting for Charge.
 const PRE_CHARGE: Duration = Duration::from_secs(60);
 
+/// The live stream as received by one subscriber.
+pub type LiveReceiver = broadcast::Receiver<Arc<Live>>;
+
 /// A reply channel for one request.
 pub type Reply<T> = oneshot::Sender<Result<T, ApiError>>;
 
@@ -41,7 +44,7 @@ pub enum Request {
         retry_in: Duration,
     },
     /// Join the live stream: a snapshot plus every message after it.
-    Subscribe(Reply<(String, broadcast::Receiver<Arc<str>>)>),
+    Subscribe(Reply<(Arc<Live>, LiveReceiver)>),
     /// The Charge button.
     Charge(Reply<RoastDoc>),
     /// The Drop button.
@@ -96,7 +99,7 @@ pub struct Engine {
     /// The last minute of readings, for the preheat trace.
     recent: VecDeque<SampleOut>,
     link: Link,
-    live: broadcast::Sender<Arc<str>>,
+    live: broadcast::Sender<Arc<Live>>,
     ror: RorSettings,
     /// Live rate of rise of the roast receiving samples.
     live_ror: Option<LiveRoR>,
@@ -113,7 +116,7 @@ impl Engine {
     /// An engine around `recording`, publishing on `live`.
     pub fn new(
         recording: Recording,
-        live: broadcast::Sender<Arc<str>>,
+        live: broadcast::Sender<Arc<Live>>,
         ror: RorSettings,
         now: fn() -> Millis,
     ) -> Self {
@@ -157,7 +160,7 @@ impl Engine {
             } => self.poll(at, result, retry_in),
             Request::Subscribe(reply) => {
                 let rx = self.live.subscribe();
-                let _ = reply.send(self.snapshot().map(|s| (Live::Snapshot(s).to_json(), rx)));
+                let _ = reply.send(self.snapshot().map(|s| (Arc::new(Live::Snapshot(s)), rx)));
             }
             Request::Charge(reply) => {
                 let at = (self.now)();
@@ -213,7 +216,7 @@ impl Engine {
                     values: sample.values,
                 };
                 self.remember(out.clone());
-                self.publish(&Live::Sample(out));
+                self.publish(Live::Sample(out));
             }
             Err(error) => {
                 let since = if self.link.state == LinkState::Down {
@@ -248,7 +251,7 @@ impl Engine {
         }
         if changes.roast_changed {
             if let Ok(doc) = self.shown_doc() {
-                self.publish(&Live::Roast(doc));
+                self.publish(Live::Roast(doc));
             }
         }
         Ok(())
@@ -297,13 +300,13 @@ impl Engine {
     fn set_link(&mut self, link: Link) {
         if link != self.link {
             self.link = link;
-            self.publish(&Live::Link(self.link.clone()));
+            self.publish(Live::Link(self.link.clone()));
         }
     }
 
-    fn publish(&self, msg: &Live) {
+    fn publish(&self, msg: Live) {
         // No subscribers is fine: nobody has the screen open.
-        let _ = self.live.send(msg.to_json().into());
+        let _ = self.live.send(Arc::new(msg));
     }
 
     fn snapshot(&self) -> Result<Snapshot, ApiError> {
@@ -383,7 +386,7 @@ mod tests {
         NOW.load(Ordering::SeqCst)
     }
 
-    fn engine() -> (Engine, broadcast::Receiver<Arc<str>>) {
+    fn engine() -> (Engine, LiveReceiver) {
         let (live, rx) = broadcast::channel(4096);
         let recording =
             Recording::open(Store::open_in_memory().unwrap(), Rules::default()).unwrap();
@@ -414,10 +417,10 @@ mod tests {
         rx.try_recv().expect("the engine replies at once")
     }
 
-    fn types(rx: &mut broadcast::Receiver<Arc<str>>) -> Vec<String> {
+    fn types(rx: &mut LiveReceiver) -> Vec<String> {
         std::iter::from_fn(|| rx.try_recv().ok())
             .map(|m| {
-                serde_json::from_str::<serde_json::Value>(&m).unwrap()["type"]
+                serde_json::to_value(&*m).unwrap()["type"]
                     .as_str()
                     .unwrap()
                     .to_owned()
@@ -438,7 +441,7 @@ mod tests {
         );
 
         let (snapshot, _sub) = ask(&mut e, Request::Subscribe).unwrap();
-        let snap: serde_json::Value = serde_json::from_str(&snapshot).unwrap();
+        let snap = serde_json::to_value(&*snapshot).unwrap();
         assert_eq!(snap["type"], "snapshot");
         assert_eq!(snap["data"]["link"]["state"], "connected");
         assert!(snap["data"]["roast"].is_null(), "no roast before Charge");
@@ -461,7 +464,7 @@ mod tests {
             poll(&mut e, s, 120.0 + f64::from(u32::try_from(s).unwrap()));
         }
         let last: serde_json::Value =
-            serde_json::from_str(&std::iter::from_fn(|| rx.try_recv().ok()).last().unwrap())
+            serde_json::to_value(&*std::iter::from_fn(|| rx.try_recv().ok()).last().unwrap())
                 .unwrap();
         assert_eq!(last["type"], "sample");
         assert!(
@@ -490,7 +493,7 @@ mod tests {
             retry_in: Duration::from_secs(2),
         });
         let msgs: Vec<serde_json::Value> = std::iter::from_fn(|| rx.try_recv().ok())
-            .map(|m| serde_json::from_str(&m).unwrap())
+            .map(|m| serde_json::to_value(&*m).unwrap())
             .collect();
         let down = msgs.iter().rev().find(|m| m["type"] == "link").unwrap();
         assert_eq!(down["data"]["state"], "down");
@@ -650,8 +653,7 @@ mod tests {
         );
         let (snapshot, _sub) = ask(&mut e, Request::Subscribe).unwrap();
         assert!(
-            serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()["data"]["roast"]
-                .is_null(),
+            serde_json::to_value(&*snapshot).unwrap()["data"]["roast"].is_null(),
             "back to waiting"
         );
     }

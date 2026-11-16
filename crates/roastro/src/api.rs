@@ -35,6 +35,7 @@ pub struct ApiError {
 impl ApiError {
     /// The stable error code, e.g. `roast_not_found`.
     #[cfg(test)]
+    #[must_use]
     pub fn code(&self) -> &'static str {
         self.code
     }
@@ -142,6 +143,7 @@ pub struct AppState {
 
 impl AppState {
     /// `origins` are full origins such as `http://127.0.0.1:8000`.
+    #[must_use]
     pub fn new(engine: mpsc::Sender<Request>, origins: Vec<String>) -> Self {
         Self {
             engine,
@@ -445,14 +447,18 @@ async fn stream_live(mut socket: WebSocket, app: AppState) {
         let Ok((snapshot, mut rx)) = app.ask(Request::Subscribe).await else {
             return;
         };
-        if socket.send(Message::Text(snapshot.into())).await.is_err() {
+        if socket
+            .send(Message::Text(snapshot.to_json().into()))
+            .await
+            .is_err()
+        {
             return;
         }
         loop {
             tokio::select! {
                 msg = rx.recv() => match msg {
-                    Ok(json) => {
-                        if socket.send(Message::Text(json.as_ref().into())).await.is_err() {
+                    Ok(msg) => {
+                        if socket.send(Message::Text(msg.to_json().into())).await.is_err() {
                             return;
                         }
                     }

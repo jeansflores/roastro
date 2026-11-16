@@ -29,6 +29,7 @@ pub enum Live {
 
 impl Live {
     /// The message as JSON text.
+    #[must_use]
     pub fn to_json(&self) -> String {
         // Serializing these plain structs cannot fail.
         serde_json::to_string(self).unwrap_or_default()
@@ -99,6 +100,10 @@ pub struct NextRoastOut {
 
 impl NextRoastOut {
     /// Reads it from the database, with the suggested reference.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
     pub fn load(store: &Store) -> store::Result<Self> {
         let next = store.next_roast()?;
         let suggested = match next.coffee_id {
@@ -180,6 +185,10 @@ pub struct PhaseOut {
 
 impl RoastDoc {
     /// Builds the document for roast `id`; `now` closes a running phase.
+    ///
+    /// # Errors
+    ///
+    /// Fails for an unknown roast or on a database error.
     pub fn load(store: &Store, id: RoastId, now: Millis) -> store::Result<Self> {
         let r = store.roast(id)?;
         let charge_at = r
@@ -280,6 +289,7 @@ pub struct RorSettings {
 }
 
 /// A roast's readings with their rate of rise, which starts at Charge.
+#[must_use]
 pub fn samples_with_ror(
     samples: Vec<Sample>,
     charge_at: Option<Millis>,
@@ -320,6 +330,7 @@ pub struct Columns {
 
 impl Columns {
     /// Turns rows into columns.
+    #[must_use]
     pub fn from_rows(rows: &[SampleOut]) -> Self {
         let mut names: Vec<&String> = rows.iter().flat_map(|r| r.values.keys()).collect();
         names.sort_unstable();
