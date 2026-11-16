@@ -9,15 +9,17 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::{Icon, Sizable as _};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, Context, Entity, FontWeight, Hsla, IntoElement, SharedString, Subscription, Window,
-    div, px, rgb,
+    Context, Entity, FontWeight, Hsla, IntoElement, SharedString, Subscription, Window, div, px,
+    rgb,
 };
 
+use roastro::wire::LinkState;
 use uuid::Uuid;
 
 use crate::chart;
 use crate::coffees::{CoffeePage, CoffeesPage, OpenCoffee, RoastItNext, ShowRoasts};
 use crate::compare::{ComparePage, CompareRoasts};
+use crate::machine_page::{MachinePage, link_words};
 use crate::new_roast::{GoLive, NewRoastPage};
 use crate::roast_detail::{Back, RoastDetail};
 use crate::roasts::{OpenRoast, RoastsPage};
@@ -91,6 +93,10 @@ pub struct Shell {
     compare: Option<Entity<ComparePage>>,
     coffees: Entity<CoffeesPage>,
     new_roast: Entity<NewRoastPage>,
+    machine: Entity<MachinePage>,
+    /// The first look at the link was taken: with no machine set up, the app
+    /// opens on Machine.
+    looked_at_setup: bool,
     /// The coffee opened last, and what keeps its events heard.
     coffee: Option<(Entity<CoffeePage>, [Subscription; 3])>,
     /// Whether a roast was recording at the last look: when that changes,
@@ -114,9 +120,19 @@ impl Shell {
         let coffees = cx.new(|cx| CoffeesPage::new(engine.clone(), cx));
         let new_roast =
             cx.new(|cx| NewRoastPage::new(engine.clone(), live.clone(), time_scale, window, cx));
+        let machine = cx.new(|cx| MachinePage::new(engine.clone(), live.clone(), window, cx));
         roasts.update(cx, RoastsPage::reload);
         let subscriptions = vec![
             cx.observe(&live, |this, live, cx| {
+                let st = &live.read(cx).state;
+                if !this.looked_at_setup
+                    && let Some(link) = &st.link
+                {
+                    this.looked_at_setup = true;
+                    if link.state == LinkState::NotSetUp {
+                        this.go(Page::Machine, cx);
+                    }
+                }
                 let recording = live.read(cx).state.recording();
                 if recording != this.was_recording {
                     this.was_recording = recording;
@@ -132,6 +148,9 @@ impl Shell {
             }),
             cx.subscribe(&live, |this, _, _: &OpenNewRoast, cx| {
                 this.go(Page::NewRoast, cx);
+            }),
+            cx.subscribe(&machine, |this, _, _: &GoLive, cx| {
+                this.go(Page::Live, cx);
             }),
             cx.subscribe(&new_roast, |this, _, _: &GoLive, cx| {
                 this.go(Page::Live, cx);
@@ -162,6 +181,8 @@ impl Shell {
             coffees,
             coffee: None,
             new_roast,
+            machine,
+            looked_at_setup: false,
             was_recording: false,
             _subscriptions: subscriptions,
             detail_back: None,
@@ -227,6 +248,10 @@ impl Shell {
     }
 
     fn go(&mut self, page: Page, cx: &mut Context<Self>) {
+        if page == Page::Machine {
+            self.machine
+                .update(cx, |machine, cx| machine.load_drops(cx));
+        }
         if page == Page::Coffees {
             self.coffees.update(cx, |coffees, cx| coffees.reload(cx));
         }
@@ -362,12 +387,18 @@ impl Shell {
                 white(0.6),
             )
         } else {
-            (
-                "Machine offline".into(),
-                "–:––".into(),
-                link_error(st),
-                rgb(0x00f8_7171).into(),
-            )
+            let (state, color) = link_words(st);
+            let title = if state == "Not set up" {
+                "Set up the machine".to_owned()
+            } else {
+                format!("Machine · {state}")
+            };
+            let line = st
+                .link
+                .as_ref()
+                .and_then(|l| l.advice.clone())
+                .unwrap_or_else(|| link_error(st));
+            (title, "–:––".into(), line, color)
         };
         div()
             .id("live-card")
@@ -409,11 +440,13 @@ impl Shell {
     }
 
     fn machine_status(st: &LiveState, cx: &mut Context<Self>) -> impl IntoElement {
-        let text = if st.connected() {
-            "Machine connected".to_owned()
-        } else {
-            "Machine offline".to_owned()
-        };
+        let name = st
+            .machine
+            .as_ref()
+            .map(|m| m.name.clone())
+            .filter(|n| !n.is_empty())
+            .unwrap_or_else(|| "Machine".to_owned());
+        let text = format!("{name} · {}", link_words(st).0);
         div()
             .id("machine-status")
             .test_support()
@@ -430,27 +463,6 @@ impl Shell {
             .on_click(cx.listener(|this, _, _, cx| this.go(Page::Machine, cx)))
             .child(div().size(px(8.)).rounded_full().bg(link_color(st)))
             .child(text)
-    }
-
-    /// A page that is not built yet: says what it will hold.
-    fn coming(page: Page) -> AnyElement {
-        let what = "The machine, its connection and its readings.";
-        div()
-            .id(SharedString::from(format!("page-{}", page.id())))
-            .test_support()
-            .size_full()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .p_6()
-            .child(
-                div()
-                    .text_2xl()
-                    .font_weight(FontWeight::BOLD)
-                    .child(page.title()),
-            )
-            .child(div().text_color(white(0.55)).child(what))
-            .into_any_element()
     }
 }
 
@@ -536,7 +548,7 @@ impl Render for Shell {
                 None => self.coffees.clone().into_any_element(),
             },
             Page::NewRoast => self.new_roast.clone().into_any_element(),
-            Page::Machine => Self::coming(Page::Machine),
+            Page::Machine => self.machine.clone().into_any_element(),
         };
         let nav = if self.page == Page::Live {
             self.rail(&st, cx).into_any_element()
@@ -915,5 +927,143 @@ mod tests {
             Page::NewRoast,
             "the next roast is prepared on its page"
         );
+    }
+
+    fn snapshot(state: roastro::wire::LinkState, roast: Option<RoastDoc>) -> roastro::wire::Live {
+        use roastro::wire::{Link, MachineOut, Snapshot};
+        roastro::wire::Live::Snapshot(Snapshot {
+            machine: MachineOut {
+                name: "Caloratto".into(),
+                // Nothing set up has no address.
+                address: if state == roastro::wire::LinkState::NotSetUp {
+                    String::new()
+                } else {
+                    "tcp://192.168.5.11:502".into()
+                },
+                model: "caloratto-2.0".into(),
+                model_title: "Carmomaq Caloratto 2.0".into(),
+                demo: false,
+            },
+            link: Link {
+                state,
+                since: 1_000_000,
+                error: (state == roastro::wire::LinkState::Down).then(|| "timed out".into()),
+                retry_at: None,
+                advice: (state == roastro::wire::LinkState::Down)
+                    .then(|| "Check the network.".into()),
+            },
+            next_roast: NextRoastOut {
+                coffee_id: None,
+                green_weight_g: None,
+                roasted_by: String::new(),
+                reference_id: None,
+                suggested_reference_id: None,
+                coffee_name: None,
+                reference_number: None,
+            },
+            roast,
+            samples: Vec::new(),
+        })
+    }
+
+    #[gpui_kit::test]
+    fn sets_up_the_machine_on_first_start(cx: &mut TestAppContext) {
+        use roastro::wire::{LinkState, TestOut};
+
+        let (handle, shell, mut rx) = open(cx);
+        let live = cx.update(|cx| shell.read(cx).live.clone());
+        cx.update(|cx| {
+            live.update(cx, |s, cx| {
+                s.apply(&snapshot(LinkState::NotSetUp, None), cx);
+            });
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            cx.update(|cx| shell.read(cx).page),
+            Page::Machine,
+            "nothing set up: the app opens on Machine"
+        );
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("machine-setup").is_some());
+            window.click("machine-address", cx);
+            window.input("192.168.5.11", cx);
+            window.click("test-machine", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let mut tested = None;
+        while let Ok(req) = rx.try_recv() {
+            if let Request::Edit(Edit::TestMachine(body, reply)) = req {
+                tested = Some((body.address, body.model));
+                let _ = reply.send(Ok(TestOut {
+                    values: [("bt".to_owned(), 182.5)].into(),
+                    latency_ms: 12,
+                }));
+            }
+        }
+        assert_eq!(
+            tested,
+            Some(("192.168.5.11".to_owned(), "caloratto-2.0".to_owned())),
+            "the real machine's model is the default"
+        );
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("test-passed").is_some(),
+                "the readings show"
+            );
+            window.click("save-machine", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        let saved = std::iter::from_fn(|| rx.try_recv().ok())
+            .any(|req| matches!(req, Request::Edit(Edit::SetMachine(ref b, _)) if b.address == "192.168.5.11"));
+        assert!(saved, "Save sets the machine up");
+    }
+
+    #[gpui_kit::test]
+    fn a_dropped_link_offers_retry_and_alerts_during_a_roast(cx: &mut TestAppContext) {
+        use roastro::wire::LinkState;
+
+        let (handle, shell, mut rx) = open(cx);
+        let live = cx.update(|cx| shell.read(cx).live.clone());
+        cx.update(|cx| live.update(cx, |s, cx| s.apply(&snapshot(LinkState::Down, None), cx)));
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("rail-machine", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("link-advice").is_some(),
+                "says what to check"
+            );
+            window.click("retry-now", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert!(
+            std::iter::from_fn(|| rx.try_recv().ok())
+                .any(|req| matches!(req, Request::Edit(Edit::RetryNow(_)))),
+            "Retry now reaches the engine"
+        );
+
+        let mut roast = done_roast(Uuid::now_v7(), 9);
+        roast.state = "recording";
+        cx.update(|cx| {
+            live.update(cx, |s, cx| {
+                s.apply(&snapshot(LinkState::Down, Some(roast)), cx);
+            });
+        });
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("nav-live", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("readings-stopped").is_some(),
+                "a red band while the roast has no readings"
+            );
+        })
+        .unwrap();
     }
 }

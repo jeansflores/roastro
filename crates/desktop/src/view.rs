@@ -17,7 +17,7 @@ use gpui_kit::{
 };
 use roast::EventKind;
 use roastro::engine::{Edit, Reply, Request};
-use roastro::wire::{EventIn, Live, NoteIn, RoastPatchIn};
+use roastro::wire::{EventIn, LinkState, Live, NoteIn, RoastPatchIn};
 use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
@@ -82,6 +82,8 @@ pub struct RoastScreen {
     weight_for: Option<Uuid>,
     /// Keeps the roasted weight's Enter handler alive.
     _weight_subscription: Subscription,
+    /// The bell rang for the readings stopping during this roast's Gap.
+    rang: bool,
 }
 
 /// The chart's click menu: an instant to mark an event or add a note on.
@@ -129,6 +131,7 @@ impl RoastScreen {
             weight,
             weight_for: None,
             _weight_subscription: weight_subscription,
+            rang: false,
         };
         cx.spawn(async move |this, cx| follow(this, cx).await)
             .detach();
@@ -793,9 +796,26 @@ impl RoastScreen {
     }
 }
 
+impl RoastScreen {
+    /// While a roast records and the machine does not answer: since when, as
+    /// a time of day.
+    fn readings_stopped(&self) -> Option<String> {
+        let link = self.state.link.as_ref()?;
+        (self.state.recording() && link.state == LinkState::Down)
+            .then(|| crate::roasts::time_of_day(link.since))
+    }
+}
+
 impl Render for RoastScreen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_weight(window, cx);
+        let stopped = self.readings_stopped();
+        // One bell when readings stop during a roast: the roaster may be
+        // looking at the machine, not the screen.
+        if stopped.is_some() && !self.rang {
+            window.play_system_bell();
+        }
+        self.rang = stopped.is_some();
         let hover_overlay = if self.menu.is_none() {
             self.hover_overlay()
         } else {
@@ -838,6 +858,20 @@ impl Render for RoastScreen {
             .children(hover_overlay)
             .children(menu_overlay)
             .child(self.header(cx))
+            .children(stopped.map(|since| {
+                div()
+                    .id("readings-stopped")
+                    .test_support()
+                    .flex_none()
+                    .px_5()
+                    .py_2()
+                    .bg(rgb(0x00b9_1c1c))
+                    .text_color(white(0.98))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child(format!(
+                        "No readings since {since} · reconnecting · the roast continues if they return within 5 minutes"
+                    ))
+            }))
             .children(self.big.then(|| self.strip()))
             .child(
                 div()

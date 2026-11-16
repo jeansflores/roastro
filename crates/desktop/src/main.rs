@@ -15,6 +15,7 @@ mod assets;
 mod chart;
 mod coffees;
 mod compare;
+mod machine_page;
 mod new_roast;
 mod roast_detail;
 mod roasts;
