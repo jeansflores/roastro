@@ -18,10 +18,11 @@ use uuid::Uuid;
 use crate::chart;
 use crate::coffees::{CoffeePage, CoffeesPage, OpenCoffee, RoastItNext, ShowRoasts};
 use crate::compare::{ComparePage, CompareRoasts};
+use crate::new_roast::{GoLive, NewRoastPage};
 use crate::roast_detail::{Back, RoastDetail};
 use crate::roasts::{OpenRoast, RoastsPage};
 use crate::state::LiveState;
-use crate::view::{Engine, RoastScreen, clock, fmt1, white};
+use crate::view::{Engine, OpenNewRoast, RoastScreen, clock, fmt1, white};
 
 /// Where the app is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -35,6 +36,8 @@ pub enum Page {
     Coffees,
     /// One coffee.
     Coffee,
+    /// The Next roast, prepared.
+    NewRoast,
     Machine,
 }
 
@@ -46,6 +49,7 @@ impl Page {
             Self::Live => "Live roast",
             Self::Roasts | Self::Roast | Self::Compare => "Roasts",
             Self::Coffees | Self::Coffee => "Coffees",
+            Self::NewRoast => "New roast",
             Self::Machine => "Machine",
         }
     }
@@ -55,6 +59,7 @@ impl Page {
             Self::Live => "live",
             Self::Roasts | Self::Roast | Self::Compare => "roasts",
             Self::Coffees | Self::Coffee => "coffees",
+            Self::NewRoast => "new-roast",
             Self::Machine => "machine",
         }
     }
@@ -64,6 +69,7 @@ impl Page {
             Self::Live => Icon::new(Lucide::Flame),
             Self::Roasts | Self::Roast | Self::Compare => Icon::new(Lucide::ChartSpline),
             Self::Coffees | Self::Coffee => Icon::new(Lucide::Coffee),
+            Self::NewRoast => Icon::new(IconName::Plus),
             Self::Machine => Icon::new(IconName::Cpu),
         }
     }
@@ -84,6 +90,7 @@ pub struct Shell {
     /// The comparison opened last.
     compare: Option<Entity<ComparePage>>,
     coffees: Entity<CoffeesPage>,
+    new_roast: Entity<NewRoastPage>,
     /// The coffee opened last, and what keeps its events heard.
     coffee: Option<(Entity<CoffeePage>, [Subscription; 3])>,
     /// Whether a roast was recording at the last look: when that changes,
@@ -105,6 +112,8 @@ impl Shell {
         let live = cx.new(|cx| RoastScreen::new(engine.clone(), time_scale, window, cx));
         let roasts = cx.new(|cx| RoastsPage::new(engine.clone(), time_scale, window, cx));
         let coffees = cx.new(|cx| CoffeesPage::new(engine.clone(), cx));
+        let new_roast =
+            cx.new(|cx| NewRoastPage::new(engine.clone(), live.clone(), time_scale, window, cx));
         roasts.update(cx, RoastsPage::reload);
         let subscriptions = vec![
             cx.observe(&live, |this, live, cx| {
@@ -120,6 +129,12 @@ impl Shell {
             }),
             cx.subscribe_in(&live, window, |this, _, open: &OpenRoast, window, cx| {
                 this.open(open.0, window, cx);
+            }),
+            cx.subscribe(&live, |this, _, _: &OpenNewRoast, cx| {
+                this.go(Page::NewRoast, cx);
+            }),
+            cx.subscribe(&new_roast, |this, _, _: &GoLive, cx| {
+                this.go(Page::Live, cx);
             }),
             cx.subscribe_in(
                 &coffees,
@@ -146,6 +161,7 @@ impl Shell {
             compare: None,
             coffees,
             coffee: None,
+            new_roast,
             was_recording: false,
             _subscriptions: subscriptions,
             detail_back: None,
@@ -182,9 +198,9 @@ impl Shell {
                 this.open(open.0, window, cx);
             }),
             cx.subscribe(&page, |this, _, next: &RoastItNext, cx| {
-                this.live
-                    .update(cx, |live, cx| live.choose_coffee(Some(next.0), cx));
-                this.go(Page::Live, cx);
+                this.new_roast
+                    .update(cx, |page, cx| page.choose_coffee(Some(next.0), cx));
+                this.go(Page::NewRoast, cx);
             }),
             cx.subscribe(&page, |this, _, show: &ShowRoasts, cx| {
                 this.roasts
@@ -250,7 +266,7 @@ impl Shell {
                     .primary()
                     .icon(IconName::Plus)
                     .label("New roast")
-                    .on_click(cx.listener(|this, _, _, cx| this.go(Page::Live, cx))),
+                    .on_click(cx.listener(|this, _, _, cx| this.go(Page::NewRoast, cx))),
             )
             .child(
                 div()
@@ -519,6 +535,7 @@ impl Render for Shell {
                 Some((coffee, _)) => coffee.clone().into_any_element(),
                 None => self.coffees.clone().into_any_element(),
             },
+            Page::NewRoast => self.new_roast.clone().into_any_element(),
             Page::Machine => Self::coming(Page::Machine),
         };
         let nav = if self.page == Page::Live {
@@ -620,7 +637,10 @@ mod tests {
         while let Ok(req) = rx.try_recv() {
             match req {
                 Request::Edit(Edit::Roasts(q, reply)) => {
-                    seen.push(format!("roasts q={:?} since={}", q.q, q.since.is_some()));
+                    // Unfiltered listings are pages loading; say only what a filter asked.
+                    if q.q.is_some() || q.since.is_some() {
+                        seen.push(format!("roasts q={:?} since={}", q.q, q.since.is_some()));
+                    }
                     let _ = reply.send(Ok(RoastPage {
                         roasts: all.to_vec(),
                         next_before: None,
@@ -652,6 +672,8 @@ mod tests {
                         roasted_by: "Ana".into(),
                         reference_id: None,
                         suggested_reference_id: None,
+                        coffee_name: None,
+                        reference_number: None,
                     }));
                 }
                 Request::Edit(Edit::PutNextRoast(next, _)) => {
@@ -690,6 +712,9 @@ mod tests {
             window.click("machine-status", cx);
             window.render_frame(cx);
             assert!(window.try_find("page-machine").is_some());
+            window.click("nav-new", cx);
+            window.render_frame(cx);
+            assert!(window.try_find("page-new-roast").is_some());
             window.click("live-card", cx);
         })
         .unwrap();
@@ -700,7 +725,7 @@ mod tests {
     fn finds_a_roast_opens_it_and_comes_back(cx: &mut TestAppContext) {
         let (handle, shell, mut rx) = open(cx);
         let roast = done_roast(Uuid::now_v7(), 7);
-        assert_eq!(serve(&mut rx, &roast), ["roasts q=None since=false"]);
+        serve(&mut rx, &roast);
 
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
@@ -885,6 +910,10 @@ mod tests {
         .unwrap();
         cx.run_until_parked();
         assert_eq!(serve(&mut rx), ["next true"]);
-        assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Live);
+        assert_eq!(
+            cx.update(|cx| shell.read(cx).page),
+            Page::NewRoast,
+            "the next roast is prepared on its page"
+        );
     }
 }

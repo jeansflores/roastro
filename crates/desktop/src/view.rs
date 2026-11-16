@@ -25,7 +25,6 @@ use uuid::Uuid;
 use crate::chart::{self, Geometry};
 use crate::state::{LiveState, Millis};
 
-pub(crate) mod next_roast;
 pub(crate) mod rail;
 
 /// Paints primary buttons in the screen's amber, with dark text.
@@ -83,8 +82,6 @@ pub struct RoastScreen {
     weight_for: Option<Uuid>,
     /// Keeps the roasted weight's Enter handler alive.
     _weight_subscription: Subscription,
-    /// The Next roast form.
-    next_form: next_roast::NextRoastForm,
 }
 
 /// The chart's click menu: an instant to mark an event or add a note on.
@@ -97,6 +94,11 @@ struct Menu {
 }
 
 impl gpui_kit::EventEmitter<crate::roasts::OpenRoast> for RoastScreen {}
+
+/// The shell opens the New roast page.
+pub struct OpenNewRoast;
+
+impl gpui_kit::EventEmitter<OpenNewRoast> for RoastScreen {}
 
 impl RoastScreen {
     pub fn new(
@@ -127,7 +129,6 @@ impl RoastScreen {
             weight,
             weight_for: None,
             _weight_subscription: weight_subscription,
-            next_form: next_roast::NextRoastForm::new(window, cx),
         };
         cx.spawn(async move |this, cx| follow(this, cx).await)
             .detach();
@@ -135,9 +136,8 @@ impl RoastScreen {
     }
 
     /// Applies a live message and fetches a new reference curve when needed.
-    fn apply(&mut self, msg: &Live, cx: &mut Context<Self>) {
+    pub(crate) fn apply(&mut self, msg: &Live, cx: &mut Context<Self>) {
         self.state.apply(msg);
-        self.next_roast_message(msg, cx);
         let wanted = self.state.wanted_reference();
         if wanted != self.state.reference.as_ref().map(|r| r.id) {
             self.state.reference = None;
@@ -796,7 +796,6 @@ impl RoastScreen {
 impl Render for RoastScreen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.sync_weight(window, cx);
-        self.sync_next(window, cx);
         let hover_overlay = if self.menu.is_none() {
             self.hover_overlay()
         } else {
@@ -877,7 +876,7 @@ mod tests {
         AppContext, Bounds, Point, TestAppContext, WindowBounds, WindowOptions, px, size,
     };
     use roastro::engine::{Edit, Request};
-    use roastro::wire::{EventOut, Live, MetricsOut, NextRoastOut, NoteOut, RoastDoc, SampleOut};
+    use roastro::wire::{EventOut, Live, MetricsOut, NoteOut, RoastDoc, SampleOut};
     use tokio::sync::mpsc;
     use uuid::Uuid;
 
@@ -1199,63 +1198,6 @@ mod tests {
         })
         .unwrap();
         assert!(cx.update(|cx| screen.read(cx).big));
-    }
-
-    #[gpui_kit::test]
-    fn the_next_roast_is_stored_as_it_is_filled(cx: &mut TestAppContext) {
-        let (handle, screen, mut rx) = open(cx);
-        let coffee = Uuid::now_v7();
-        let suggested = Uuid::now_v7();
-        cx.update(|cx| screen.update(cx, |s, cx| s.choose_coffee(Some(coffee), cx)));
-        cx.run_until_parked();
-        match next_request(&mut rx) {
-            Some(Request::Edit(Edit::PutNextRoast(next, _))) => {
-                assert_eq!((next.coffee_id, next.reference_id), (Some(coffee), None));
-            }
-            _ => panic!("choosing a coffee did not store it"),
-        }
-        let stored = NextRoastOut {
-            coffee_id: Some(coffee),
-            green_weight_g: None,
-            roasted_by: String::new(),
-            reference_id: None,
-            suggested_reference_id: Some(suggested),
-        };
-        cx.update(|cx| screen.update(cx, |s, cx| s.apply(&Live::NextRoast(stored.clone()), cx)));
-        cx.run_until_parked();
-        match next_request(&mut rx) {
-            Some(Request::Edit(Edit::PutNextRoast(next, _))) => {
-                assert_eq!(
-                    next.reference_id,
-                    Some(suggested),
-                    "the coffee's latest roast becomes the reference"
-                );
-            }
-            _ => panic!("the suggested reference was not taken"),
-        }
-        let stored = NextRoastOut {
-            reference_id: Some(suggested),
-            ..stored
-        };
-        cx.update(|cx| screen.update(cx, |s, cx| s.apply(&Live::NextRoast(stored), cx)));
-        cx.update_window(handle, |_, window, cx| {
-            window.render_frame(cx);
-            window.click("green-weight", cx);
-            window.input("5", cx);
-            window.press("enter", cx);
-        })
-        .unwrap();
-        cx.run_until_parked();
-        match next_request(&mut rx) {
-            Some(Request::Edit(Edit::PutNextRoast(next, _))) => {
-                assert_eq!(
-                    (next.coffee_id, next.green_weight_g, next.reference_id),
-                    (Some(coffee), Some(5000), Some(suggested)),
-                    "one change, the rest kept"
-                );
-            }
-            _ => panic!("the green weight was not stored"),
-        }
     }
 
     /// The next request, skipping the lists the Next roast form loads.
