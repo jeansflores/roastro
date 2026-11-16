@@ -15,6 +15,7 @@
   color-scheme: dark;
 }
 html, body { height: 100%; }
+[hidden] { display: none !important; }
 body { background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
 * { box-sizing: border-box; }
 button, select, input { font: inherit; color: inherit; }
@@ -22,7 +23,43 @@ button { cursor: pointer; }
 :focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
 .label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
-.app { height: 100%; display: flex; flex-direction: column; }
+.app { height: 100%; display: flex; }
+.side { width: 232px; flex: none; background: var(--panel); border-right: 1px solid var(--line); display: flex; flex-direction: column; gap: 14px; padding: 16px 12px; overflow-y: auto; }
+.side .brand { padding: 2px 8px 6px; }
+.live-card { display: grid; gap: 4px; padding: 10px 12px; border-radius: 10px; border: 1px solid rgba(245,165,36,.45); background: rgba(245,165,36,.08); cursor: pointer; text-align: left; }
+.live-card.idle { border-color: var(--line); background: var(--panel-2); }
+.live-card .k { display: flex; align-items: center; gap: 6px; font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--accent); font-weight: 600; }
+.live-card.idle .k { color: var(--dim); }
+.pulse { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: pulse 1.4s infinite; }
+@keyframes pulse { 50% { opacity: .3; } }
+.live-card .big { display: flex; justify-content: space-between; font: 700 20px var(--mono); }
+.nav { display: grid; gap: 2px; }
+.nav a { display: flex; justify-content: space-between; align-items: center; padding: 8px 10px; border-radius: 8px; color: var(--dim); text-decoration: none; font-weight: 500; }
+.nav a:hover { color: var(--fg); background: rgba(255,255,255,.03); }
+.nav a.on { color: var(--fg); background: var(--panel-2); }
+.nav .count { font: 12px var(--mono); color: var(--faint); }
+.side-foot { margin-top: auto; display: grid; gap: 4px; padding: 10px; border-radius: 10px; border: 1px solid var(--line); font-size: 12px; color: var(--dim); cursor: pointer; }
+.dot { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.content { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.page { flex: 1; min-height: 0; overflow-y: auto; padding: 20px 24px 90px; display: grid; gap: 20px; align-content: start; }
+.page h1 { margin: 0; font-size: 22px; }
+.card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 16px; display: grid; gap: 12px; align-content: start; }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: 6px 16px; font-size: 13px; }
+.kv > :nth-child(odd) { color: var(--dim); }
+.form { display: grid; gap: 14px; max-width: 560px; }
+.form label { display: grid; gap: 6px; }
+.form .two { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+.hint { font-size: 12px; color: var(--faint); }
+table.plain { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.plain th { text-align: left; font-weight: 500; color: var(--dim); font-size: 11px; letter-spacing: .06em; text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid var(--line); white-space: nowrap; }
+table.plain td { padding: 9px 10px; border-bottom: 1px solid rgba(255,255,255,.04); vertical-align: top; }
+table.plain tr.click { cursor: pointer; } table.plain tr.click:hover td { background: rgba(255,255,255,.03); }
+.pill { display: inline-flex; align-items: center; gap: 6px; padding: 2px 10px; border-radius: 999px; font-size: 12px; font-weight: 600; }
+.l-top { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; padding: 12px 20px; border-bottom: 1px solid var(--line); }
+.l-body { flex: 1; min-height: 0; display: flex; }
+.l-chart { flex: 1; min-width: 0; padding: 10px 8px 70px; display: flex; flex-direction: column; }
+.l-rail { width: 360px; flex: none; border-left: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding: 18px; display: grid; gap: 18px; align-content: start; }
+.toast { position: fixed; left: 50%; transform: translateX(-50%); bottom: 70px; background: var(--panel-2); border: 1px solid rgba(255,255,255,.15); border-radius: 10px; padding: 8px 14px; font-size: 13px; z-index: 60; }
 header.top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-block: 12px; border-bottom: 1px solid var(--line);
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
 .brand { font: 700 13px var(--mono); letter-spacing: .2em; color: var(--accent); }
@@ -121,6 +158,9 @@ table.b tr:hover td { background: rgba(255,255,255,.05); }
 .switcher span { padding: 0 10px; white-space: nowrap; }
 
 @media (max-width: 860px) {
+  .app { flex-direction: column; } .side { width: auto; flex-direction: row; flex-wrap: wrap; align-items: center; }
+  .nav { grid-auto-flow: column; } .side-foot { margin-top: 0; } .l-body { flex-direction: column; overflow-y: auto; } .l-rail { width: auto; } .l-chart { min-height: 360px; }
+  .form .two { grid-template-columns: 1fr; }
   main.body { flex-direction: column; overflow-y: auto; }
   .a-list, .c-coffees { width: auto; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); }
   .a-under { grid-template-columns: 1fr; }
@@ -130,12 +170,17 @@ table.b tr:hover td { background: rgba(255,255,255,.05); }
 </style>
 
 <div class="app">
-  <header class="top">
+  <aside class="side">
     <span class="brand">ROASTRO</span>
-    <nav class="tabs"><button class="tab">Live roast</button><button class="tab on">History</button></nav>
-    <span class="next-ref" id="nextRef"></span>
-  </header>
-  <main class="body" id="view"></main>
+    <button class="live-card" id="liveCard"></button>
+    <button class="btn primary" id="newRoast">+ New roast</button>
+    <nav class="nav" id="nav"></nav>
+    <div class="side-foot" id="machineFoot"></div>
+  </aside>
+  <div class="content">
+    <header class="top" id="roastsTop"><span class="next-ref" id="nextRef"></span></header>
+    <main class="body" id="view"></main>
+  </div>
 </div>
 <div class="switcher" aria-label="Prototype variant switcher">
   <button id="prev" aria-label="Previous variant">←</button><span id="vname"></span><button id="next" aria-label="Next variant">→</button>
@@ -147,10 +192,11 @@ const C = { bt: '#f5a524', et: '#7aa2f7', ror: '#2dd4bf', gas: '#c084fc', air: '
 const PALETTE = ['#f5a524', '#7aa2f7', '#f472b6', '#2dd4bf', '#a3e635', '#c084fc'];
 function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
 const COFFEES = [
-  { id: 'eth', name: 'Ethiopia Guji Natural', lot: '2401', origin: 'Ethiopia' },
-  { id: 'bra', name: 'Brazil Cerrado Mineiro', lot: '2398', origin: 'Brazil' },
-  { id: 'col', name: 'Colombia Huila Washed', lot: '2410', origin: 'Colombia' },
-  { id: 'ken', name: 'Kenya Nyeri AA', lot: '2412', origin: 'Kenya' },
+  { id: 'eth', name: 'Ethiopia Guji Natural', lot: '2401', origin: 'Ethiopia', process: 'Natural', supplier: 'Importer A', notes: 'Fruity, blueberry. Light development.' },
+  { id: 'bra', name: 'Brazil Cerrado Mineiro', lot: '2398', origin: 'Brazil', process: 'Pulped natural', supplier: 'Importer B', notes: 'Espresso base. Chocolate, nuts.' },
+  { id: 'col', name: 'Colombia Huila Washed', lot: '2410', origin: 'Colombia', process: 'Washed', supplier: 'Importer A', notes: 'Caramel, red apple.' },
+  { id: 'ken', name: 'Kenya Nyeri AA', lot: '2412', origin: 'Kenya', process: 'Washed', supplier: 'Importer C', notes: 'Blackcurrant, bright. Watch the crash.' },
+  { id: 'gua', name: 'Guatemala Huehuetenango', lot: '2380', origin: 'Guatemala', process: 'Washed', supplier: 'Importer B', notes: 'Lot finished.', archived: true },
 ];
 const coffee = id => COFFEES.find(c => c.id === id);
 
@@ -206,6 +252,22 @@ const ROASTS = (() => {
   return list.reverse(); // newest first
 })();
 const byId = id => ROASTS.find(r => r.id === id);
+// The roast being recorded right now: a full roast revealed second by second (real time).
+const LIVE = { r: makeRoast(49, 'eth', '2026-11-16 08:05', 4242, { notes: [[150, 'charged a bit hot']] }), t: 312, state: 'recording', ref: 'r48' };
+LIVE.r.ref = 'r48';
+function liveView() {
+  const r = LIVE.r, t = LIVE.t, cut = a => a.slice(0, t + 1);
+  const events = Object.fromEntries(Object.entries(r.events).map(([k, v]) => [k, v != null && v <= t ? v : null]));
+  return { ...r, bt: cut(r.bt), et: cut(r.et), ror: cut(r.ror), gas: cut(r.gas), air: cut(r.air), events, notes: r.notes.filter(n => n[0] <= t) };
+}
+function tickLive() {
+  if (LIVE.state !== 'recording') return;
+  LIVE.t++;
+  if (LIVE.t >= LIVE.r.events.drop + 20) {
+    LIVE.state = 'waiting'; ROASTS.unshift(LIVE.r);
+    toast('Roast #49 dropped and saved. Waiting for the next Charge.');
+  }
+}
 
 // ===== Shared helpers ======================================================================
 const clock = s => s == null ? '—' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
@@ -283,7 +345,8 @@ function drawChart(canvas) {
   const main = series.find(s => s.main);
   if (main && !compact && opts.align !== 'fc') {
     const e = main.r.events;
-    [[0, e.de, C.et], [e.de, e.fc, C.bt], [e.fc, e.drop, C.ror]].forEach(([a, b, col]) => { g.fillStyle = col + '0d'; g.fillRect(X(a), pad.t, X(b) - X(a), plotH); });
+    const end = main.r.bt.length - 1;
+    [[0, e.de ?? end, C.et], [e.de, e.fc ?? end, C.bt], [e.fc, e.drop ?? end, C.ror]].forEach(([a, b, col]) => { if (a == null) return; g.fillStyle = col + '0d'; g.fillRect(X(a), pad.t, X(b) - X(a), plotH); });
   }
   const line = (arr, s, f, color, width, dash, alpha) => {
     g.strokeStyle = color; g.globalAlpha = alpha ?? 1; g.lineWidth = width; g.setLineDash(dash || []); g.beginPath(); let on = false;
@@ -372,6 +435,7 @@ function VariantA(root) {
       <div><div class="t">Roast #${o.number} ${state.nextRef === o.id ? '<span class="star" title="Next roast reference">★</span>' : ''}</div><div class="s">${coffee(o.coffee).name} · ${timeLabel(o.date)}</div></div>
       <div class="m">${clock(m.total)}<br>DTR ${m.dtr.toFixed(0)}%</div></div>`;
   });
+  if (LIVE.state === 'recording') rows = `<div class="a-row" data-live style="border-left-color:var(--accent)"><span class="pulse"></span><div><div class="t">Roast #49 · recording</div><div class="s">${coffee(LIVE.r.coffee).name} · ${clock(LIVE.t)}</div></div><div class="m">open live ›</div></div>` + rows;
   root.innerHTML = `
     <aside class="a-list">
       <div class="a-filters">
@@ -401,7 +465,7 @@ function VariantA(root) {
   root.querySelector('#aCoffee').onchange = e => { s.coffee = e.target.value; render(); };
   root.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { s.range = b.dataset.range; render(); });
   const q = root.querySelector('#aQ'); q.oninput = e => { s.q = e.target.value; render(); const n = document.getElementById('aQ'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
-  root.querySelectorAll('.a-row').forEach(el => el.onclick = ev => { if (ev.target.dataset.cmp) return; s.sel = el.dataset.id; render(); });
+  root.querySelectorAll('.a-row').forEach(el => el.onclick = ev => { if (ev.target.dataset.cmp) return; if (el.hasAttribute('data-live')) return nav('live'); s.sel = el.dataset.id; render(); });
   root.querySelectorAll('[data-cmp]').forEach(cb => cb.onchange = () => { cb.checked ? s.compare.add(cb.dataset.cmp) : s.compare.delete(cb.dataset.cmp); render(); });
   if (!r) return;
   root.querySelector('#aUse').onclick = () => setNextRef(r.id);
@@ -495,7 +559,7 @@ function VariantC(root) {
   const refId = state.nextRef && byId(state.nextRef).coffee === s.coffee ? state.nextRef : null;
   const open = s.open ? byId(s.open) : null;
   root.innerHTML = `
-    <aside class="c-coffees">${COFFEES.map(c => { const rs = ROASTS.filter(r => r.coffee === c.id); const best = state.nextRef && byId(state.nextRef).coffee === c.id;
+    <aside class="c-coffees">${COFFEES.filter(c => ROASTS.some(r => r.coffee === c.id)).map(c => { const rs = ROASTS.filter(r => r.coffee === c.id); const best = state.nextRef && byId(state.nextRef).coffee === c.id;
       return `<div class="c-coffee ${s.coffee === c.id ? 'sel' : ''}" data-coffee="${c.id}"><span class="n">${c.name}</span><span class="s">lot ${c.lot} · ${rs.length} roasts · last ${dayLabel(rs[0].date)}</span>${best ? `<span class="s star">★ next roast follows #${byId(state.nextRef).number}</span>` : ''}</div>`; }).join('')}</aside>
     <section class="c-main">${open ? detailC(open, roasts, refId) : `
       <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h1 style="margin:0;font-size:22px">${coffee(s.coffee).name}</h1><span style="color:var(--dim)">lot ${coffee(s.coffee).lot} · ${roasts.length} roasts, newest first</span></div>
@@ -551,20 +615,203 @@ function detailC(r, roasts, refId) {
     </div></div>`;
 }
 
-// ===== Switcher (prototype scaffolding) ====================================================
-const VARIANTS = [['a', 'Library', VariantA], ['b', 'Compare table', VariantB], ['c', 'By coffee', VariantC]];
-function render() {
-  const v = VARIANTS.find(x => x[0] === state.variant) || VARIANTS[0];
-  charts.clear();
-  document.getElementById('vname').textContent = `${v[0].toUpperCase()} · ${v[1]}`;
-  nextRefLine();
-  v[2](document.getElementById('view'));
+// ===== Screens around the history =========================================================
+function toast(text) { const t = document.createElement('div'); t.className = 'toast'; t.textContent = text; document.body.appendChild(t); setTimeout(() => t.remove(), 2600); }
+const MACHINE = { name: 'Carmomaq Caloratto 5 kg', host: '192.168.1.50:502', map: 'caloratto-2.0 (read-only)', poll: '1 s', since: '07:58', latency: 12 };
+const preheatBt = () => 195 + Math.sin(Date.now() / 9000) * 1.5;
+
+// Live roast: the screen that exists today (variant D), shown here only to link the screens.
+function ScreenLive(root) {
+  const recording = LIVE.state === 'recording';
+  const v = liveView(), t = LIVE.t, ref = byId(LIVE.ref);
+  const at = (a, i = t) => a[Math.min(i, a.length - 1)];
+  const refBt = ref && ref.bt[t];
+  const done = k => v.events[k] != null;
+  const next = !done('de') ? 'Dry end' : !done('fc') ? 'First crack' : null;
+  root.innerHTML = recording ? `<div class="content" style="flex:1">
+    <div class="l-top"><span class="pill" style="background:rgba(245,165,36,.15);color:var(--accent)"><span class="pulse"></span>RECORDING</span>
+      <b>Roast #49</b><span>${coffee(v.coffee).name}</span><span class="mono" style="color:var(--dim)">${(v.green / 1000).toFixed(2)} kg</span>
+      <span style="margin-left:auto;color:var(--dim)">Reference Roast #${ref.number}</span>
+      <span class="hint">This is the live screen already built (variant D), simplified.</span></div>
+    <div class="l-body">
+      <div class="l-chart"><div class="chartbox" style="flex:1"><canvas id="lChart"></canvas></div></div>
+      <aside class="l-rail">
+        <div class="fig"><div class="label">Roast time</div><span class="v" style="font-size:52px">${clock(t)}</span></div>
+        <div class="fig"><div class="label">Bean temp · BT</div><span class="v" style="font-size:40px;color:${C.bt}">${f1(at(v.bt))}</span><span class="u">°C</span>
+          <div class="hint mono">ref ${f1(refBt)} · ${refBt ? ((at(v.bt) - refBt) >= 0 ? '+' : '') + (at(v.bt) - refBt).toFixed(1) : ''}</div></div>
+        <div class="figs">
+          <div class="fig"><div class="label">RoR</div><span class="v" style="color:${C.ror}">${f1(at(v.ror))}</span></div>
+          <div class="fig"><div class="label">ET</div><span class="v" style="color:${C.et}">${f1(at(v.et))}</span></div>
+          <div class="fig"><div class="label">Air</div><span class="v" style="color:${C.air}">${at(v.air)}</span><span class="u">%</span></div>
+          <div class="fig"><div class="label">Gas</div><span class="v" style="color:${C.gas}">${at(v.gas)}</span><span class="u">%</span></div>
+        </div>
+        <div style="display:grid;gap:8px"><span class="label">Timeline</span>
+          ${Object.entries(v.events).filter(([k, x]) => x != null).map(([k, x]) => `<div class="note"><span class="when">${clock(x)}</span><b>${k === 'charge' ? 'Charge' : EVENT[k]}</b><span class="mono" style="color:${C.bt}">${f1(v.bt[x])}°</span></div>`).join('')}
+          ${v.notes.map(([x, text]) => `<div class="note"><span class="when">${clock(x)}</span><span>“${text}”</span></div>`).join('')}
+          <div class="note" style="color:var(--accent)"><span class="when">${clock(t)}</span><span>now</span></div>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;padding-left:50px">${next ? `<button class="btn primary small" data-mark>${next}</button>` : ''}<button class="btn small" data-mark>Drop</button></div>
+        </div>
+      </aside></div></div>`
+  : `<div class="page"><h1>Waiting for charge</h1>
+      <div class="card" style="max-width:560px"><div class="kv"><span>Machine</span><span>${MACHINE.name} · connected</span><span>BT now</span><span class="mono" style="color:${C.bt}">${f1(preheatBt())} °C (preheat)</span>
+      <span>Next roast</span><span>${nextRoastLine()}</span></div>
+      <div style="display:flex;gap:8px"><button class="btn primary" data-go="new">Prepare the next roast</button><button class="btn" data-go="roasts">See Roast #49 in history</button></div>
+      <span class="hint">Charge is detected automatically. The live chart starts on its own.</span></div></div>`;
+  root.querySelectorAll('[data-mark]').forEach(b => b.onclick = () => toast('In the app this marks the event at now.'));
+  root.querySelectorAll('[data-go]').forEach(b => b.onclick = () => nav(b.dataset.go));
+  if (recording) chart(root.querySelector('#lChart'), [{ r: ref, color: 'rgba(255,255,255,.45)', dash: [6, 4] }, { r: v, single: true, main: true }], { ror: true, et: true, strip: true, events: true });
 }
-function go(step) { const i = VARIANTS.findIndex(x => x[0] === state.variant); state.variant = VARIANTS[(i + step + VARIANTS.length) % VARIANTS.length][0]; history.replaceState(null, '', '#' + state.variant); render(); }
+
+// New roast: the Next roast, prepared before Charge.
+const NEXT = { coffee: 'eth', green: '4.50', by: 'Ana', ref: null };
+const latestOf = c => ROASTS.find(r => r.coffee === c);
+function nextRoastLine() { const r = byId(NEXT.ref ?? latestOf(NEXT.coffee)?.id); return `${coffee(NEXT.coffee).name} · ${NEXT.green} kg · ${r ? 'reference #' + r.number : 'no reference'}`; }
+function ScreenNew(root) {
+  const refId = NEXT.ref ?? latestOf(NEXT.coffee)?.id ?? '';
+  const choices = ROASTS.filter(r => r.coffee === NEXT.coffee);
+  const others = ROASTS.filter(r => r.coffee !== NEXT.coffee).slice(0, 6);
+  const busy = LIVE.state === 'recording';
+  root.innerHTML = `<div class="page">
+    <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h1>New roast</h1><span style="color:var(--dim)">What the next Charge takes into the roast. Saved as you type.</span></div>
+    ${busy ? `<div class="card" style="border-color:rgba(245,165,36,.45)"><span>Roast #49 is recording now (${clock(LIVE.t)}). This sets up the roast <b>after</b> it.</span></div>` : ''}
+    <div style="display:grid;grid-template-columns:minmax(0,560px) minmax(0,1fr);gap:24px">
+      <form class="form" id="nForm">
+        <label><span class="label">Coffee</span><select class="field" id="nCoffee">${COFFEES.filter(c => !c.archived).map(c => `<option value="${c.id}" ${c.id === NEXT.coffee ? 'selected' : ''}>${c.name} · lot ${c.lot}</option>`).join('')}</select>
+          <span class="hint">Not here? <a href="#coffees" style="color:var(--accent)">Add it in Coffees</a>.</span></label>
+        <div class="two">
+          <label><span class="label">Green weight (kg)</span><input class="field mono" id="nGreen" value="${NEXT.green}" inputmode="decimal"></label>
+          <label><span class="label">Roasted by</span><input class="field" id="nBy" value="${NEXT.by}"></label>
+        </div>
+        <label><span class="label">Reference roast</span><select class="field" id="nRef">
+          ${choices.map((r, i) => `<option value="${r.id}" ${r.id === refId ? 'selected' : ''}>Roast #${r.number} · ${dayLabel(r.date)} · DTR ${metrics(r).dtr.toFixed(0)}%${i === 0 ? ' (latest of this coffee)' : ''}</option>`).join('')}
+          <optgroup label="Other coffees">${others.map(r => `<option value="${r.id}" ${r.id === refId ? 'selected' : ''}>Roast #${r.number} · ${coffee(r.coffee).name}</option>`).join('')}</optgroup>
+          <option value="" ${refId === '' ? 'selected' : ''}>No reference</option></select></label>
+        <div style="display:flex;gap:8px;align-items:center"><button class="btn primary" type="submit">Go to the live screen</button><span class="hint">Charge is detected automatically.</span></div>
+      </form>
+      <div class="card">${refId ? (() => { const r = byId(refId); const m = metrics(r); return `<span class="label">Reference preview</span><b>Roast #${r.number} · ${coffee(r.coffee).name}</b>
+        <div class="chartbox" style="height:200px"><canvas id="nChart"></canvas></div>
+        <div class="kv"><span>Total</span><span class="mono">${clock(m.total)}</span><span>First crack</span><span class="mono">${clock(m.fc)}</span><span>DTR</span><span class="mono">${m.dtr.toFixed(1)}%</span><span>Drop BT</span><span class="mono">${f1(m.dropBt)}°</span></div>
+        ${r.notes.length ? `<div class="hint">“${r.notes.at(-1)[1]}”</div>` : ''}`; })() : '<span class="hint">No reference: the live chart has nothing behind the curve.</span>'}</div>
+    </div></div>`;
+  const f = root.querySelector('#nForm');
+  root.querySelector('#nCoffee').onchange = e => { NEXT.coffee = e.target.value; NEXT.ref = null; render(); };
+  root.querySelector('#nRef').onchange = e => { NEXT.ref = e.target.value; render(); };
+  root.querySelector('#nGreen').oninput = e => NEXT.green = e.target.value;
+  root.querySelector('#nBy').oninput = e => NEXT.by = e.target.value;
+  f.onsubmit = e => { e.preventDefault(); nav('live'); };
+  if (refId) chart(root.querySelector('#nChart'), [{ r: byId(refId), single: true, main: true }], { ror: true, events: true });
+}
+
+// Coffees: the green coffees, their lots and how they roast.
+const COF = { open: null, adding: false, showArchived: false };
+function ScreenCoffees(root) {
+  const list = COFFEES.filter(c => COF.showArchived || !c.archived);
+  const stats = c => { const rs = ROASTS.filter(r => r.coffee === c.id); const best = state.nextRef && byId(state.nextRef)?.coffee === c.id ? byId(state.nextRef) : null;
+    return { n: rs.length, last: rs[0], dtr: rs.length ? rs.reduce((a, r) => a + metrics(r).dtr, 0) / rs.length : null, loss: rs.length ? rs.reduce((a, r) => a + metrics(r).loss, 0) / rs.length : null, used: rs.reduce((a, r) => a + r.green, 0), best, rs }; };
+  const open = COF.open && COFFEES.find(c => c.id === COF.open);
+  root.innerHTML = `<div class="page">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><h1>Coffees</h1><span style="color:var(--dim)">${list.length} green coffees</span>
+      <label style="display:flex;gap:6px;align-items:center;font-size:13px;color:var(--dim);margin-left:auto"><input type="checkbox" id="cArch" ${COF.showArchived ? 'checked' : ''}> Show finished lots</label>
+      <button class="btn primary" id="cAdd">+ Add coffee</button></div>
+    ${COF.adding ? `<form class="card form" id="cForm" style="max-width:none"><b>New coffee</b>
+      <div class="two"><label><span class="label">Name</span><input class="field" id="fName" placeholder="Ethiopia Yirgacheffe" required></label><label><span class="label">Lot</span><input class="field mono" id="fLot" placeholder="2420"></label></div>
+      <div class="two"><label><span class="label">Origin</span><input class="field" id="fOrigin"></label><label><span class="label">Process</span><select class="field" id="fProc"><option>Washed</option><option>Natural</option><option>Pulped natural</option><option>Honey</option></select></label></div>
+      <label><span class="label">Notes</span><input class="field" id="fNotes" placeholder="How it roasts, what to watch"></label>
+      <div style="display:flex;gap:8px"><button class="btn primary" type="submit">Add coffee</button><button class="btn" type="button" id="fCancel">Cancel</button></div></form>` : ''}
+    <div style="overflow-x:auto"><table class="plain"><thead><tr><th>Coffee</th><th>Lot</th><th>Process</th><th style="text-align:right">Roasts</th><th>Last roast</th><th style="text-align:right">Green used</th><th style="text-align:right">Avg DTR</th><th style="text-align:right">Avg loss</th><th>Reference</th></tr></thead><tbody>
+      ${list.map(c => { const st = stats(c); return `<tr class="click" data-c="${c.id}" style="${c.archived ? 'opacity:.5' : ''}">
+        <td><b>${c.name}</b><div class="hint">${c.origin}${c.archived ? ' · finished' : ''}</div></td><td class="mono">${c.lot}</td><td>${c.process}</td>
+        <td class="mono" style="text-align:right">${st.n}</td><td>${st.last ? `#${st.last.number} · ${dayLabel(st.last.date)}` : '—'}</td>
+        <td class="mono" style="text-align:right">${(st.used / 1000).toFixed(1)} kg</td><td class="mono" style="text-align:right">${st.dtr ? st.dtr.toFixed(1) + '%' : '—'}</td><td class="mono" style="text-align:right">${st.loss ? st.loss.toFixed(1) + '%' : '—'}</td>
+        <td>${st.best ? `<span class="star">★ #${st.best.number}</span>` : st.last ? `latest #${st.last.number}` : '—'}</td></tr>`; }).join('')}
+    </tbody></table></div>
+    ${open ? (() => { const st = stats(open); return `<div class="card"><div style="display:flex;gap:10px;align-items:baseline;flex-wrap:wrap"><b style="font-size:17px">${open.name}</b><span class="hint">lot ${open.lot} · ${open.process} · ${open.supplier}</span>
+      <span style="margin-left:auto;display:flex;gap:8px"><button class="btn small" id="cRoasts">See its roasts</button><button class="btn small" id="cArchive">${open.archived ? 'Bring back' : 'Lot finished'}</button><button class="btn primary small" id="cNext">Roast it next</button></span></div>
+      <div class="hint" style="font-size:13px;color:var(--dim)">${open.notes}</div>
+      <div class="c-grid">${st.rs.slice(0, 4).map(r => `<div class="c-card"><div class="row"><b style="color:var(--fg)">#${r.number}</b><span>${dayLabel(r.date)}</span></div><canvas data-thumb="${r.id}"></canvas><div class="row mono"><span>${clock(metrics(r).total)}</span><span>DTR ${metrics(r).dtr.toFixed(0)}%</span></div></div>`).join('') || '<span class="hint">Not roasted yet.</span>'}</div></div>`; })() : '<span class="hint">Click a coffee for its notes and latest roasts.</span>'}
+  </div>`;
+  root.querySelector('#cArch').onchange = e => { COF.showArchived = e.target.checked; render(); };
+  root.querySelector('#cAdd').onclick = () => { COF.adding = true; render(); root.querySelector('#fName').focus(); };
+  root.querySelectorAll('[data-c]').forEach(tr => tr.onclick = () => { COF.open = tr.dataset.c; render(); });
+  const form = root.querySelector('#cForm');
+  if (form) {
+    root.querySelector('#fCancel').onclick = () => { COF.adding = false; render(); };
+    form.onsubmit = e => { e.preventDefault(); const name = root.querySelector('#fName').value.trim(); if (!name) return;
+      const id = 'c' + Date.now(); COFFEES.push({ id, name, lot: root.querySelector('#fLot').value || '—', origin: root.querySelector('#fOrigin').value || '—', process: root.querySelector('#fProc').value, supplier: '—', notes: root.querySelector('#fNotes').value || 'No notes yet.' });
+      COF.adding = false; COF.open = id; render(); toast(`${name} added.`); };
+  }
+  if (open) {
+    root.querySelector('#cRoasts').onclick = () => { state.a.coffee = open.id; state.b.coffee = open.id; state.c.coffee = open.id; state.c.open = null; nav('roasts'); };
+    root.querySelector('#cArchive').onclick = () => { open.archived = !open.archived; render(); };
+    root.querySelector('#cNext').onclick = () => { NEXT.coffee = open.id; NEXT.ref = null; nav('new'); };
+    root.querySelectorAll('[data-thumb]').forEach(c => chart(c, [{ r: byId(c.dataset.thumb), single: true }], { compact: true, ror: true }));
+  }
+}
+
+// Machine: what Roastro is connected to, read only.
+function ScreenMachine(root) {
+  const rec = LIVE.state === 'recording', v = liveView(), t = LIVE.t;
+  const bt = rec ? v.bt[t] : preheatBt(), et = rec ? v.et[t] : 228, gas = rec ? v.gas[t] : 30, fan = rec ? v.air[t] : 40, drum = 65;
+  const reading = (name, point, val, unit, color, extra = '') => `<tr><td>${name}</td><td class="mono hint">${point}</td><td class="mono" style="text-align:right;color:${color || 'var(--fg)'}">${val}${unit}</td><td class="hint">${extra}</td></tr>`;
+  const today = ROASTS.filter(r => r.date.startsWith('2026-11-16')).length + (rec ? 1 : 0);
+  root.innerHTML = `<div class="page">
+    <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap"><h1>Machine</h1><span class="pill" style="background:rgba(45,212,191,.12);color:var(--ror)"><span class="dot" style="background:var(--ror)"></span>Connected since ${MACHINE.since}</span></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px">
+      <div class="card"><b>${MACHINE.name}</b><div class="kv">
+        <span>Address</span><span class="mono">${MACHINE.host} · Modbus TCP</span><span>Register map</span><span class="mono">${MACHINE.map}</span>
+        <span>Reading every</span><span class="mono">${MACHINE.poll}</span><span>Response time</span><span class="mono">${MACHINE.latency} ms</span>
+        <span>Readings lost today</span><span class="mono">0 gaps</span><span>Roasts today</span><span class="mono">${today}</span></div>
+        <div class="hint" style="border-top:1px solid var(--line);padding-top:10px">Roastro only reads the machine. Gas, air and drum are set on the machine's own panel.</div></div>
+      <div class="card"><div style="display:flex;justify-content:space-between;align-items:center"><b>Now</b>${rec ? '<span class="pill" style="background:rgba(245,165,36,.15);color:var(--accent)"><span class="pulse"></span>Roast #49 recording</span>' : '<span class="pill" style="background:rgba(255,255,255,.08);color:var(--dim)">Preheat · waiting for charge</span>'}</div>
+        <table class="plain"><tbody>
+          ${reading('Bean temp · BT', 'bt', f1(bt), ' °C', C.bt)}${reading('Air temp · ET', 'et', f1(et), ' °C', C.et)}
+          ${reading('Gas', 'gas_cmd', gas, ' %', C.gas)}${reading('Air (fan)', 'fan', fan, ' %', C.air, '≈ airflow from the manual table')}${reading('Drum', 'drum', drum, ' %', 'var(--fg)', '≈ rpm from the manual table')}
+        </tbody></table>
+        ${rec ? `<div style="display:flex;gap:10px;align-items:center"><span class="mono">${clock(t)} · ${coffee(v.coffee).name}</span><button class="btn primary small" data-go="live" style="margin-left:auto">Open the live roast</button></div>` : `<button class="btn primary small" data-go="new">Prepare the next roast</button>`}</div>
+    </div></div>`;
+  root.querySelectorAll('[data-go]').forEach(b => b.onclick = () => nav(b.dataset.go));
+}
+
+// ===== Shell, router and the history's variant switcher (prototype scaffolding) ==============
+const SCREENS = { live: ['Live roast', ScreenLive], roasts: ['Roasts', null], coffees: ['Coffees', ScreenCoffees], machine: ['Machine', ScreenMachine], new: ['New roast', ScreenNew] };
+const VARIANTS = [['a', 'Library', VariantA], ['b', 'Compare table', VariantB], ['c', 'By coffee', VariantC]];
+let screen = 'roasts';
+function nav(to) { screen = to; history.replaceState(null, '', '#' + (to === 'roasts' ? state.variant : to)); render(); }
+function sidebar() {
+  const rec = LIVE.state === 'recording', v = liveView();
+  const card = document.getElementById('liveCard');
+  card.className = 'live-card' + (rec ? '' : ' idle');
+  card.innerHTML = rec
+    ? `<span class="k"><span class="pulse"></span>Recording · Roast #49</span><span class="big"><span>${clock(LIVE.t)}</span><span style="color:${C.bt}">${f1(v.bt[LIVE.t])}°</span></span><span class="hint">${coffee(v.coffee).name}</span>`
+    : `<span class="k">Waiting for charge</span><span class="big"><span>–:––</span><span style="color:${C.bt}">${f1(preheatBt())}°</span></span><span class="hint">Next: ${coffee(NEXT.coffee).name}</span>`;
+  card.onclick = () => nav('live');
+  document.getElementById('nav').innerHTML = ['live', 'roasts', 'coffees', 'machine'].map(k => `<a href="#${k === 'roasts' ? state.variant : k}" class="${screen === k ? 'on' : ''}" data-nav="${k}">${SCREENS[k][0]}<span class="count">${k === 'roasts' ? ROASTS.length : k === 'coffees' ? COFFEES.filter(c => !c.archived).length : k === 'live' && rec ? '●' : ''}</span></a>`).join('');
+  document.querySelectorAll('[data-nav]').forEach(a => a.onclick = e => { e.preventDefault(); nav(a.dataset.nav); });
+  document.getElementById('machineFoot').innerHTML = `<span><span class="dot" style="background:var(--ror)"></span>&nbsp; ${MACHINE.name}</span><span class="mono">${MACHINE.host} · ${MACHINE.latency} ms</span>`;
+  document.getElementById('machineFoot').onclick = () => nav('machine');
+}
+document.getElementById('newRoast').onclick = () => nav('new');
+function render() {
+  charts.clear();
+  sidebar();
+  const onRoasts = screen === 'roasts';
+  document.getElementById('roastsTop').hidden = !onRoasts;
+  document.querySelector('.switcher').hidden = !onRoasts;
+  const view = document.getElementById('view');
+  if (onRoasts) {
+    const v = VARIANTS.find(x => x[0] === state.variant) || VARIANTS[0];
+    document.getElementById('vname').textContent = `Roasts: ${v[0].toUpperCase()} · ${v[1]}`;
+    nextRefLine();
+    v[2](view);
+  } else SCREENS[screen][1](view);
+}
+function go(step) { if (screen !== 'roasts') return; const i = VARIANTS.findIndex(x => x[0] === state.variant); state.variant = VARIANTS[(i + step + VARIANTS.length) % VARIANTS.length][0]; nav('roasts'); }
 document.getElementById('prev').onclick = () => go(-1);
 document.getElementById('next').onclick = () => go(1);
 document.addEventListener('keydown', e => { if (e.target.closest('input, textarea, select, [contenteditable]')) return; if (e.key === 'ArrowLeft') go(-1); if (e.key === 'ArrowRight') go(1); });
-const fromHash = () => { const h = location.hash.slice(1); if (VARIANTS.some(x => x[0] === h)) state.variant = h; };
+const fromHash = () => { const h = location.hash.slice(1); if (VARIANTS.some(x => x[0] === h)) { screen = 'roasts'; state.variant = h; } else if (SCREENS[h]) screen = h; };
 window.addEventListener('hashchange', () => { fromHash(); render(); });
+// The live roast ticks in real time; only the screens that show it redraw.
+setInterval(() => { tickLive(); if (screen === 'live' || screen === 'machine') render(); else sidebar(); }, 1000);
 fromHash(); render();
 </script>

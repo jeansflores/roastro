@@ -11,5 +11,13 @@ the white bar at the bottom, the ← / → keys, or `#a`, `#b`, `#c`:
 | B | Compare table | Sortable metrics table (FC, Dev, DTR, Drop BT, loss, RoR swing) with sparklines | Ticked rows overlay in the big chart, align on Charge or First crack, differences vs. the first ticked | In the roast drawer (click #) |
 | C | By coffee | Pick the coffee, its roasts as small multiples | Detail against the coffee's best, the previous roast, or nothing; step older/newer | "Mark as best": the coffee's best is the next reference |
 
+Around the history, the screens the app would have, linked from a sidebar:
+**Live roast** (a roast in progress, ticking in real time, also shown in the
+sidebar card and pinned at the top of the Library list), **New roast** (the Next
+roast with a reference preview), **Coffees** (green coffees, lots, stats, add /
+finish a lot, "roast it next") and **Machine** (connection, register map, live
+readings; read only). Routes: `#live`, `#a`/`#b`/`#c` (Roasts), `#new`,
+`#coffees`, `#machine`.
+
 The roasts are synthetic example data generated in the page; nothing is
 persisted and nothing talks to the engine or a PLC.
