@@ -485,7 +485,7 @@ async fn follow(this: WeakEntity<RoastScreen>, cx: &mut AsyncApp) -> Option<()> 
     }
 }
 
-fn clock(s: f64) -> String {
+pub(crate) fn clock(s: f64) -> String {
     #[allow(clippy::cast_possible_truncation)]
     let s = s.max(0.0) as i64;
     format!("{}:{:02}", s / 60, s % 60)
@@ -656,7 +656,7 @@ fn hover_card(st: &LiveState, s: f64) -> Option<impl IntoElement> {
     )
 }
 
-fn fmt1(v: Option<f64>) -> String {
+pub(crate) fn fmt1(v: Option<f64>) -> String {
     v.map_or_else(|| "—".to_owned(), |v| format!("{v:.1}"))
 }
 
@@ -664,7 +664,7 @@ fn fmt0(v: Option<f64>) -> String {
     v.map_or_else(|| "—".to_owned(), |v| format!("{v:.0}"))
 }
 
-fn white(a: f32) -> Hsla {
+pub(crate) fn white(a: f32) -> Hsla {
     Hsla {
         h: 0.0,
         s: 0.0,

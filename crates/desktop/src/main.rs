@@ -11,7 +11,9 @@
 // A windowed app on Windows: no console window behind it in release builds.
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
+mod assets;
 mod chart;
+mod shell;
 mod simulator;
 mod state;
 mod view;
@@ -26,7 +28,8 @@ use gpui_kit::component::theme::{Theme, ThemeMode};
 use gpui_kit::{AppContext, Bounds, TitlebarOptions, WindowBounds, WindowOptions, px, size};
 use regmap::Map;
 
-use crate::view::{Engine, RoastScreen};
+use crate::shell::Shell;
+use crate::view::Engine;
 
 // Doc comments here are the --help text, so they stay plain prose.
 #[allow(clippy::doc_markdown)]
@@ -105,37 +108,39 @@ fn main() -> anyhow::Result<()> {
 
     let engine = Engine(running.requests);
     let exit_after = args.exit_after;
-    gpui_kit::application().run(move |cx| {
-        gpui_kit::init(cx);
-        Theme::change(ThemeMode::Dark, None, cx);
-        view::use_accent(cx);
-        let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
-                None,
-                size(px(1440.), px(900.)),
-                cx,
-            ))),
-            titlebar: Some(TitlebarOptions {
-                title: Some("Roastro".into()),
+    gpui_kit::application()
+        .with_assets(assets::AppAssets)
+        .run(move |cx| {
+            gpui_kit::init(cx);
+            Theme::change(ThemeMode::Dark, None, cx);
+            view::use_accent(cx);
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
+                    None,
+                    size(px(1440.), px(900.)),
+                    cx,
+                ))),
+                titlebar: Some(TitlebarOptions {
+                    title: Some("Roastro".into()),
+                    ..Default::default()
+                }),
                 ..Default::default()
-            }),
-            ..Default::default()
-        };
-        if let Err(err) = gpui_kit::open_window(options, cx, |window, cx| {
-            cx.new(|cx| RoastScreen::new(engine, time_scale, window, cx))
-        }) {
-            tracing::error!(%err, "could not open the window");
-            cx.quit();
-        }
-        if let Some(secs) = exit_after {
-            cx.spawn(async move |cx| {
-                cx.background_executor()
-                    .timer(Duration::from_secs(secs))
-                    .await;
-                cx.update(|cx| cx.quit());
-            })
-            .detach();
-        }
-    });
+            };
+            if let Err(err) = gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| Shell::new(engine, time_scale, window, cx))
+            }) {
+                tracing::error!(%err, "could not open the window");
+                cx.quit();
+            }
+            if let Some(secs) = exit_after {
+                cx.spawn(async move |cx| {
+                    cx.background_executor()
+                        .timer(Duration::from_secs(secs))
+                        .await;
+                    cx.update(|cx| cx.quit());
+                })
+                .detach();
+            }
+        });
     Ok(())
 }
