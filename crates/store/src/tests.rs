@@ -490,3 +490,40 @@ fn sets_up_the_machine_and_keeps_demo_roasts_apart() {
     drop(st);
     std::fs::remove_dir_all(dir).unwrap();
 }
+
+#[test]
+fn backs_up_and_restores_everything() {
+    let dir = std::env::temp_dir().join(format!("roastro-backup-{}", Uuid::now_v7()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let mut st = Store::open(dir.join("roastro.db")).unwrap();
+    st.add_coffee("Guji").unwrap();
+    let kept = st.start_roast(5_000, Source::Manual, &[]).unwrap();
+    let backup = dir.join("backup.db");
+    st.back_up(&backup).unwrap();
+    assert_eq!(
+        Store::inspect_backup(&backup).unwrap(),
+        BackupInfo {
+            roasts: 1,
+            last_charge_at: Some(5_000),
+            coffees: 1,
+        }
+    );
+
+    let lost = st.start_roast(9_000, Source::Manual, &[]).unwrap();
+    st.restore(&backup).unwrap();
+    assert!(st.roast(kept).is_ok());
+    assert!(
+        st.roast(lost).is_err(),
+        "what came after the backup is gone"
+    );
+
+    std::fs::write(dir.join("notes.txt"), "not a database").unwrap();
+    assert!(matches!(
+        Store::inspect_backup(&dir.join("notes.txt")),
+        Err(Error::NotABackup(_))
+    ));
+    assert!(st.restore(&dir.join("notes.txt")).is_err());
+    assert!(st.roast(kept).is_ok(), "a refused restore changes nothing");
+    drop(st);
+    std::fs::remove_dir_all(dir).unwrap();
+}

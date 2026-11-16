@@ -19,7 +19,7 @@ use uuid::Uuid;
 use crate::chart;
 use crate::coffees::{CoffeePage, CoffeesPage, OpenCoffee, RoastItNext, ShowRoasts};
 use crate::compare::{ComparePage, CompareRoasts};
-use crate::machine_page::{MachinePage, link_words};
+use crate::machine_page::{MachinePage, Restored, link_words};
 use crate::new_roast::{GoLive, NewRoastPage};
 use crate::roast_detail::{Back, RoastDetail};
 use crate::roasts::{OpenRoast, RoastsPage};
@@ -148,6 +148,15 @@ impl Shell {
             }),
             cx.subscribe(&live, |this, _, _: &OpenNewRoast, cx| {
                 this.go(Page::NewRoast, cx);
+            }),
+            cx.subscribe(&machine, |this, _, _: &Restored, cx| {
+                // Roasts, coffees and ids before the restore are gone.
+                this.detail = None;
+                this.compare = None;
+                this.coffee = None;
+                this.roasts.update(cx, RoastsPage::reload);
+                this.coffees.update(cx, |c, cx| c.reload(cx));
+                this.new_roast.update(cx, |n, cx| n.load_choices(cx));
             }),
             cx.subscribe(&machine, |this, _, _: &GoLive, cx| {
                 this.go(Page::Live, cx);
@@ -1077,5 +1086,76 @@ mod tests {
             );
         })
         .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn backs_up_and_restores_from_the_machine_page(cx: &mut TestAppContext) {
+        use roastro::wire::{BackupOut, LinkState};
+
+        let (handle, shell, mut rx) = open(cx);
+        let live = cx.update(|cx| shell.read(cx).live.clone());
+        cx.update(|cx| {
+            live.update(cx, |s, cx| {
+                s.apply(&snapshot(LinkState::Connected, None), cx);
+            });
+        });
+        let info = BackupOut {
+            roasts: 12,
+            last_charge_at: Some(1_000_000),
+            coffees: 3,
+        };
+        let serve = |rx: &mut mpsc::Receiver<Request>| {
+            let mut seen = Vec::new();
+            while let Ok(req) = rx.try_recv() {
+                match req {
+                    Request::Edit(Edit::BackUp(path, reply)) => {
+                        seen.push(format!("back up {}", path.display()));
+                        let _ = reply.send(Ok(info.clone()));
+                    }
+                    Request::Edit(Edit::InspectBackup(path, reply)) => {
+                        seen.push(format!("inspect {}", path.display()));
+                        let _ = reply.send(Ok(info.clone()));
+                    }
+                    Request::Edit(Edit::RestoreBackup(path, reply)) => {
+                        seen.push(format!("restore {}", path.display()));
+                        let _ = reply.send(Ok(info.clone()));
+                    }
+                    _ => {}
+                }
+            }
+            seen
+        };
+        serve(&mut rx);
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("rail-machine", cx);
+            window.render_frame(cx);
+            window.click("back-up", cx);
+        })
+        .unwrap();
+        cx.simulate_new_path_selection(|_| Some("/media/pen/roastro.db".into()));
+        cx.run_until_parked();
+        assert_eq!(serve(&mut rx), ["back up /media/pen/roastro.db"]);
+
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("restore", cx);
+        })
+        .unwrap();
+        cx.simulate_path_prompt_response(|_| Some(vec!["/media/pen/roastro.db".into()]));
+        cx.run_until_parked();
+        assert_eq!(serve(&mut rx), ["inspect /media/pen/roastro.db"]);
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("restore-confirm").is_some(),
+                "asks before replacing"
+            );
+            window.click("confirm-restore", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(serve(&mut rx), ["restore /media/pen/roastro.db"]);
     }
 }

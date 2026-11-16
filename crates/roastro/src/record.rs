@@ -20,18 +20,26 @@ pub struct Recording {
     store: Store,
     recorder: Recorder,
     current: Option<RoastId>,
+    rules: Rules,
 }
 
 impl Recording {
     /// Starts recording on `store`, picking up a roast that was still
     /// Recording when Roastro stopped (a restart is a Gap like any other).
     pub fn open(store: Store, rules: Rules) -> anyhow::Result<Self> {
+        let (recorder, current) = Self::pick_up(&store, rules)?;
+        Ok(Self {
+            store,
+            recorder,
+            current,
+            rules,
+        })
+    }
+
+    /// The recorder for the roast still Recording in `store`, if any.
+    fn pick_up(store: &Store, rules: Rules) -> anyhow::Result<(Recorder, Option<RoastId>)> {
         let Some(id) = store.recording_roast()? else {
-            return Ok(Self {
-                store,
-                recorder: Recorder::new(rules),
-                current: None,
-            });
+            return Ok((Recorder::new(rules), None));
         };
         let roast = store.roast(id)?;
         let at = |kind| roast.events.iter().find(|e| e.kind == kind).map(|e| e.at);
@@ -46,11 +54,26 @@ impl Recording {
             roast = roast.number,
             "resuming the roast that was recording"
         );
-        Ok(Self {
-            store,
-            recorder: Recorder::resume(rules, resume),
-            current: Some(id),
-        })
+        Ok((Recorder::resume(rules, resume), Some(id)))
+    }
+
+    /// Picks up again from the database, as after a restart: after the
+    /// machine in use changed.
+    pub fn reload(&mut self) -> anyhow::Result<()> {
+        let (recorder, current) = Self::pick_up(&self.store, self.rules)?;
+        self.recorder = recorder;
+        self.current = current;
+        Ok(())
+    }
+
+    /// Replaces the database with a backup and picks up from it, as after a
+    /// restart.
+    pub fn restore(&mut self, path: &std::path::Path) -> anyhow::Result<()> {
+        self.store.restore(path)?;
+        let (recorder, current) = Self::pick_up(&self.store, self.rules)?;
+        self.recorder = recorder;
+        self.current = current;
+        Ok(())
     }
 
     /// Feeds one input through the recorder, writes what it decides and says

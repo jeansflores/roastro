@@ -52,6 +52,12 @@ pub enum Error {
     /// No roast with this id.
     #[error("no roast {0}")]
     NoRoast(RoastId),
+    /// The file is not a Roastro database.
+    #[error("{0} is not a Roastro backup")]
+    NotABackup(String),
+    /// The backup comes from a newer Roastro.
+    #[error("{0} comes from a newer Roastro: update this one first")]
+    NewerBackup(String),
 }
 
 /// A database result.
@@ -198,28 +204,7 @@ impl Store {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrate(&mut conn)?;
-        // The machine in use, else the first real one.
-        let existing: Option<String> = conn
-            .query_row(
-                "SELECT COALESCE(
-                    (SELECT m.id FROM machine m JOIN app_setting s
-                       ON s.key = 'current_machine' AND s.value = m.id),
-                    (SELECT id FROM machine WHERE demo = 0 ORDER BY rowid LIMIT 1))",
-                [],
-                |r| r.get(0),
-            )
-            .optional()?
-            .flatten();
-        let machine_id = if let Some(id) = existing {
-            parse_uuid(&id)?
-        } else {
-            let id = Uuid::now_v7();
-            conn.execute(
-                "INSERT INTO machine (id, name) VALUES (?1, ?2)",
-                params![id.to_string(), DEFAULT_MACHINE],
-            )?;
-            id
-        };
+        let machine_id = current_machine(&conn)?;
         Ok(Self { conn, machine_id })
     }
 
@@ -571,6 +556,113 @@ impl Store {
             params![id.to_string(), name],
         )?;
         Ok(id)
+    }
+}
+
+/// The machine in use, else the first real one; made on first open.
+fn current_machine(conn: &Connection) -> Result<Uuid> {
+    let existing: Option<String> = conn
+        .query_row(
+            "SELECT COALESCE(
+                (SELECT m.id FROM machine m JOIN app_setting s
+                   ON s.key = 'current_machine' AND s.value = m.id),
+                (SELECT id FROM machine WHERE demo = 0 ORDER BY rowid LIMIT 1))",
+            [],
+            |r| r.get(0),
+        )
+        .optional()?
+        .flatten();
+    if let Some(id) = existing {
+        return parse_uuid(&id);
+    }
+    let id = Uuid::now_v7();
+    conn.execute(
+        "INSERT INTO machine (id, name) VALUES (?1, ?2)",
+        params![id.to_string(), DEFAULT_MACHINE],
+    )?;
+    Ok(id)
+}
+
+/// What a backup file holds, read before restoring it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BackupInfo {
+    /// Roasts in it, discarded ones included.
+    pub roasts: i64,
+    /// When its newest roast was charged.
+    pub last_charge_at: Option<Millis>,
+    /// Coffees in it.
+    pub coffees: i64,
+}
+
+impl Store {
+    /// Writes a consistent copy of the whole database to `path`, even while
+    /// roasts are being recorded.
+    ///
+    /// # Errors
+    ///
+    /// Fails if the file cannot be written.
+    pub fn back_up(&self, path: &Path) -> Result<()> {
+        self.conn.backup(
+            rusqlite::MAIN_DB,
+            path,
+            None::<fn(rusqlite::backup::Progress)>,
+        )?;
+        Ok(())
+    }
+
+    /// Reads what a backup holds, refusing a file that is not a Roastro
+    /// database or comes from a newer Roastro.
+    ///
+    /// # Errors
+    ///
+    /// [`Error::NotABackup`] for such a file; a database error otherwise.
+    pub fn inspect_backup(path: &Path) -> Result<BackupInfo> {
+        let not_a_backup = || Error::NotABackup(path.display().to_string());
+        let conn = Connection::open_with_flags(path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .map_err(|_| not_a_backup())?;
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |r| r.get(0))
+            .map_err(|_| not_a_backup())?;
+        let known = i64::try_from(MIGRATIONS.len()).unwrap_or(i64::MAX);
+        if version < 1 {
+            return Err(not_a_backup());
+        }
+        if version > known {
+            return Err(Error::NewerBackup(path.display().to_string()));
+        }
+        conn.query_row(
+            "SELECT (SELECT COUNT(*) FROM roast),
+                    (SELECT MAX(at) FROM roast_event WHERE kind = 'charge'),
+                    (SELECT COUNT(*) FROM coffee)",
+            [],
+            |r| {
+                Ok(BackupInfo {
+                    roasts: r.get(0)?,
+                    last_charge_at: r.get(1)?,
+                    coffees: r.get(2)?,
+                })
+            },
+        )
+        .map_err(|_| not_a_backup())
+    }
+
+    /// Replaces everything with a backup's contents, brings its schema up to
+    /// date and uses its machine. Check it with [`Store::inspect_backup`]
+    /// first.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a file that is not a Roastro backup, or a database error.
+    pub fn restore(&mut self, path: &Path) -> Result<()> {
+        Self::inspect_backup(path)?;
+        self.conn.restore(
+            rusqlite::MAIN_DB,
+            path,
+            None::<fn(rusqlite::backup::Progress)>,
+        )?;
+        migrate(&mut self.conn)?;
+        self.machine_id = current_machine(&self.conn)?;
+        Ok(())
     }
 }
 

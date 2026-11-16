@@ -133,6 +133,24 @@ pub struct MachineIn {
     pub demo: bool,
 }
 
+/// What a backup file holds.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct BackupOut {
+    pub roasts: i64,
+    pub last_charge_at: Option<Millis>,
+    pub coffees: i64,
+}
+
+impl From<store::BackupInfo> for BackupOut {
+    fn from(b: store::BackupInfo) -> Self {
+        Self {
+            roasts: b.roasts,
+            last_charge_at: b.last_charge_at,
+            coffees: b.coffees,
+        }
+    }
+}
+
 /// What one test read brought back.
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct TestOut {

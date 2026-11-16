@@ -5,6 +5,7 @@
 mod edits;
 
 use std::collections::VecDeque;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -17,6 +18,7 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 
 use crate::api::ApiError;
 use crate::record::Recording;
+use crate::wire::BackupOut;
 use crate::wire::{
     CoffeeIn, CoffeeOut, CoffeePatch, Columns, EventIn, Link, LinkDropOut, LinkState, Live,
     MachineIn, MachineOut, NextRoastIn, NextRoastOut, NoteIn, NoteOut, NotePatch, RoastDoc,
@@ -105,6 +107,12 @@ pub enum Edit {
     SetMachine(MachineIn, Reply<MachineOut>),
     /// One read of settings not saved yet, to see that they work.
     TestMachine(MachineIn, Reply<TestOut>),
+    /// Write a copy of the whole database there.
+    BackUp(PathBuf, Reply<BackupOut>),
+    /// What a backup file holds, before restoring it.
+    InspectBackup(PathBuf, Reply<BackupOut>),
+    /// Replace everything with a backup. Refused while a roast is recording.
+    RestoreBackup(PathBuf, Reply<BackupOut>),
 }
 
 /// Why a poll brought no reading.
@@ -147,6 +155,8 @@ pub enum LinkCommand {
     Connect(Target),
     /// Read this machine once and answer, without changing the connection.
     Test(Target, Reply<TestOut>),
+    /// Stop reading: no machine is set up.
+    Disconnect,
 }
 
 /// The engine's state. Lives on its own thread; see [`Engine::run`].
@@ -304,7 +314,7 @@ impl Engine {
     }
 
     fn set_machine(&mut self, body: &MachineIn) -> Result<MachineOut, ApiError> {
-        if self.recording.current().is_some() {
+        if self.recording.is_before_drop() {
             return Err(ApiError::conflict(
                 "roast_recording",
                 "Finish the roast before changing the machine.",
@@ -325,6 +335,8 @@ impl Engine {
             }
         }
         .map_err(ApiError::internal)?;
+        // A roast in its tail after Drop ends here: its machine is gone.
+        self.recording.reload().map_err(ApiError::internal)?;
         self.machine = MachineOut::from(saved);
         if let Some(control) = &self.link_control
             && control.try_send(LinkCommand::Connect(target)).is_err()
@@ -332,8 +344,11 @@ impl Engine {
             tracing::error!("the polling task is not listening");
         }
         // What was on screen belongs to the machine before.
-        self.shown = None;
+        self.shown = self.recording.current();
         self.live_ror = None;
+        if let Some(id) = self.shown {
+            self.start_live_ror(id);
+        }
         self.recent.clear();
         self.open_drop = None;
         self.link = Link {
@@ -374,6 +389,85 @@ impl Engine {
                 "Roastro is busy; try again",
             )));
         }
+    }
+
+    fn backup_error(err: &store::Error) -> ApiError {
+        match err {
+            store::Error::NotABackup(_) | store::Error::NewerBackup(_) => {
+                ApiError::unprocessable("not_a_backup", err.to_string())
+            }
+            other => ApiError::unprocessable("backup_failed", other.to_string()),
+        }
+    }
+
+    fn back_up(&self, path: &std::path::Path) -> Result<BackupOut, ApiError> {
+        self.recording
+            .store()
+            .back_up(path)
+            .map_err(|e| Self::backup_error(&e))?;
+        store::Store::inspect_backup(path)
+            .map(BackupOut::from)
+            .map_err(|e| Self::backup_error(&e))
+    }
+
+    fn restore(&mut self, path: &std::path::Path) -> Result<BackupOut, ApiError> {
+        if self.recording.is_before_drop() {
+            return Err(ApiError::conflict(
+                "roast_recording",
+                "Finish the roast before restoring a backup.",
+            ));
+        }
+        let info = store::Store::inspect_backup(path).map_err(|e| Self::backup_error(&e))?;
+        self.recording
+            .restore(path)
+            .map_err(|e| ApiError::unprocessable("backup_failed", e.to_string()))?;
+        let machine = self
+            .recording
+            .store()
+            .machine()
+            .map_err(ApiError::internal)?;
+        self.machine = MachineOut::from(machine.clone());
+        let command = if machine.demo {
+            LinkCommand::Connect(Target::Demo)
+        } else if machine.address.is_empty() {
+            LinkCommand::Disconnect
+        } else {
+            match crate::machine::model_map(&machine.model) {
+                Ok(map) => LinkCommand::Connect(Target::Machine {
+                    url: machine.address,
+                    map: Arc::new(map),
+                }),
+                Err(_) => LinkCommand::Disconnect,
+            }
+        };
+        let not_set_up = matches!(command, LinkCommand::Disconnect);
+        if let Some(control) = &self.link_control
+            && control.try_send(command).is_err()
+        {
+            tracing::error!("the polling task is not listening");
+        }
+        self.shown = self.recording.current();
+        self.live_ror = None;
+        if let Some(id) = self.shown {
+            self.start_live_ror(id);
+        }
+        self.recent.clear();
+        self.open_drop = None;
+        self.link = Link {
+            state: if not_set_up {
+                LinkState::NotSetUp
+            } else {
+                LinkState::Connecting
+            },
+            since: (self.now)(),
+            error: None,
+            retry_at: None,
+            advice: None,
+        };
+        self.publish(Live::Machine(self.machine.clone()));
+        let snapshot = self.snapshot()?;
+        self.publish(Live::Snapshot(snapshot));
+        Ok(BackupOut::from(info))
     }
 
     /// Dials the machine now; the link shows Connecting until it answers.
@@ -948,6 +1042,66 @@ mod tests {
             set(&mut e, "192.168.5.12", "caloratto-2.0").map(|_| ()),
             Err("roast_recording")
         );
+    }
+
+    #[test]
+    fn backs_up_and_restores_between_roasts() {
+        let (mut e, mut rx) = engine();
+        let dir = std::env::temp_dir().join(format!("roastro-engine-{}", uuid::Uuid::now_v7()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let backup = dir.join("backup.db");
+        let roast = |e: &mut Engine, from: i64| {
+            for s in from..from + 3 {
+                poll(e, s, 120.0);
+            }
+            ask(e, Request::Charge).unwrap();
+            poll(e, from + 3, 121.0);
+            ask(e, Request::Drop).unwrap();
+            poll(e, from + 4, 122.0);
+        };
+        roast(&mut e, 0);
+        let saved = edit(&mut e, |r| Edit::BackUp(backup.clone(), r)).unwrap();
+        assert_eq!(saved.roasts, 1);
+        roast(&mut e, 100);
+        let page = |e: &mut Engine| {
+            edit(e, |r| Edit::Roasts(RoastQueryIn::default(), r))
+                .unwrap()
+                .roasts
+                .len()
+        };
+        assert_eq!(page(&mut e), 2);
+
+        let notes = dir.join("notes.txt");
+        std::fs::write(&notes, "not a database").unwrap();
+        assert_eq!(
+            edit(&mut e, |r| Edit::InspectBackup(notes.clone(), r)).map(|_| ()),
+            Err("not_a_backup")
+        );
+        assert_eq!(
+            edit(&mut e, |r| Edit::InspectBackup(backup.clone(), r)).unwrap(),
+            saved
+        );
+
+        let _ = types(&mut rx);
+        assert_eq!(
+            edit(&mut e, |r| Edit::RestoreBackup(backup.clone(), r)).unwrap(),
+            saved
+        );
+        assert_eq!(page(&mut e), 1, "back to the backup");
+        assert!(
+            types(&mut rx).contains(&"snapshot".to_owned()),
+            "the screens start over"
+        );
+
+        for s in 200..203 {
+            poll(&mut e, s, 120.0);
+        }
+        ask(&mut e, Request::Charge).unwrap();
+        assert_eq!(
+            edit(&mut e, |r| Edit::RestoreBackup(backup.clone(), r)).map(|_| ()),
+            Err("roast_recording")
+        );
+        std::fs::remove_dir_all(dir).unwrap();
     }
 
     #[test]
