@@ -10,6 +10,9 @@ use gpui_kit::{
 };
 use roast::EventKind;
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use crate::state::LiveState;
 
 /// Roast-clock range shown (seconds); grows if a roast runs longer.
@@ -70,6 +73,9 @@ struct Frame {
     now_s: f64,
     waiting: bool,
     gap_s: f64,
+    /// The roast second under the pointer, and the values drawn as dots there:
+    /// live BT, ET, `RoR`, then the reference's BT and ET.
+    hover: Option<(f64, [Option<f64>; 5])>,
 }
 
 impl Frame {
@@ -118,16 +124,52 @@ impl Frame {
             now_s: state.now().map_or(0.0, |at| state.roast_s(at)),
             waiting: state.roast.is_none(),
             gap_s: GAP_WALL_S * state.time_scale,
+            hover: None,
         }
     }
 }
 
-/// The chart element for the current state.
-pub fn chart(state: &LiveState) -> impl IntoElement {
-    let frame = Frame::from(state);
+/// Where the main plot was last drawn and what it spans, so the screen can
+/// turn a pointer position into a roast second.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Geometry {
+    plot: Bounds<Pixels>,
+    x_min: f64,
+    x_max: f64,
+}
+
+impl Geometry {
+    /// The roast second under a window position, if it is over the plot.
+    #[must_use]
+    pub fn roast_s(&self, position: Point<Pixels>) -> Option<f64> {
+        if !self.plot.contains(&position) {
+            return None;
+        }
+        let fraction = f64::from((position.x - self.plot.left()) / self.plot.size.width);
+        Some(self.x_min + fraction * (self.x_max - self.x_min))
+    }
+}
+
+/// The chart element for the current state. It records where it was drawn in
+/// `geometry`, and draws the pointer's crosshair at `hover_s`.
+pub fn chart(
+    state: &LiveState,
+    geometry: Rc<Cell<Option<Geometry>>>,
+    hover_s: Option<f64>,
+) -> impl IntoElement {
+    let mut frame = Frame::from(state);
+    frame.hover = hover_s.map(|s| {
+        let live = state.sample_near(s);
+        let value = |k: &str| live.and_then(|x| x.values.get(k).copied());
+        let reference = state.reference_near(s).unwrap_or((None, None));
+        let ror = live
+            .and_then(|x| x.ror)
+            .filter(|_| state.event_at(EventKind::TurningPoint).is_some());
+        (s, [value("bt"), value("et"), ror, reference.0, reference.1])
+    });
     canvas(
         |_, _, _| {},
-        move |bounds, (), window, cx| paint(bounds, &frame, window, cx),
+        move |bounds, (), window, cx| paint(bounds, &frame, &geometry, window, cx),
     )
     .size_full()
 }
@@ -145,7 +187,13 @@ pub fn label(kind: EventKind) -> &'static str {
 }
 
 #[allow(clippy::too_many_lines, clippy::many_single_char_names)] // one drawing pass; x/y/s/t read like the math
-fn paint(bounds: Bounds<Pixels>, f: &Frame, window: &mut Window, cx: &mut App) {
+fn paint(
+    bounds: Bounds<Pixels>,
+    f: &Frame,
+    geometry: &Cell<Option<Geometry>>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let (left, right, top, bottom) = (px(48.), px(40.), px(28.), px(22.));
     let inner_h = bounds.size.height - top - bottom;
     let strip_h = inner_h * 0.16;
@@ -170,6 +218,11 @@ fn paint(bounds: Bounds<Pixels>, f: &Frame, window: &mut Window, cx: &mut App) {
         |r: f64| main.bottom() - main.size.height * ((r.clamp(-2.0, ROR_MAX) / ROR_MAX) as f32);
     let y_p = |p: f64| strip.bottom() - strip.size.height * ((p.clamp(0.0, 120.0) / 120.0) as f32);
     let in_x = |s: f64| (X_MIN..=x_max).contains(&s);
+    geometry.set(Some(Geometry {
+        plot: main,
+        x_min: X_MIN,
+        x_max,
+    }));
 
     // Phase bands.
     if let Some(charge) = at(f, EventKind::Charge) {
@@ -361,6 +414,30 @@ fn paint(bounds: Bounds<Pixels>, f: &Frame, window: &mut Window, cx: &mut App) {
             point(x(0.0) + px(4.), main.top() - px(18.)),
             bt(),
         );
+    }
+
+    // The pointer: a crosshair and a dot on every curve under it.
+    if let Some((s, values)) = f.hover.filter(|(s, _)| in_x(*s)) {
+        line(
+            window,
+            &[(x(s), main.top()), (x(s), strip.bottom())],
+            px(1.),
+            white(0.35),
+            None,
+        );
+        let colors = [bt(), et(), ror(), faded(bt(), 0.5), faded(et(), 0.5)];
+        for (i, (v, color)) in values.iter().zip(colors).enumerate() {
+            let Some(v) = v else { continue };
+            let y = if i == 2 { y_r(*v) } else { y_t(*v) };
+            let c = point(x(s), y);
+            window.paint_quad(
+                fill(Bounds::centered_at(c, size(px(11.), px(11.))), white(0.9))
+                    .corner_radii(px(5.5)),
+            );
+            window.paint_quad(
+                fill(Bounds::centered_at(c, size(px(7.), px(7.))), color).corner_radii(px(3.5)),
+            );
+        }
     }
 }
 

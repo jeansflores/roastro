@@ -3,11 +3,16 @@
 //! timeline of events and notes.
 
 use gpui_kit::component::button::{Button, ButtonVariants as _};
-use gpui_kit::component::input::{Input, InputState};
+use std::cell::Cell;
+use std::rc::Rc;
+
+use gpui_kit::TestSupportExt as _;
+use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AsyncApp, Context, Entity, FontWeight, Hsla, IntoElement, SharedString, WeakEntity, Window,
-    div, px, relative, rgb,
+    AnyElement, AsyncApp, Context, Entity, FontWeight, Hsla, IntoElement, MouseButton,
+    MouseDownEvent, MouseMoveEvent, Pixels, Point, SharedString, Subscription, WeakEntity, Window,
+    anchored, deferred, div, point, px, relative, rgb,
 };
 use roast::EventKind;
 use roastro::engine::{Edit, Reply, Request};
@@ -16,7 +21,7 @@ use tokio::sync::broadcast::error::RecvError;
 use tokio::sync::{mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::chart::{self, faded};
+use crate::chart::{self, Geometry, faded};
 use crate::state::{LiveState, Millis};
 
 /// The engine's request queue, as the UI uses it.
@@ -41,6 +46,24 @@ pub struct RoastScreen {
     note: Entity<InputState>,
     /// The last refusal or failure, shown under the buttons.
     message: Option<String>,
+    /// Where the chart was last drawn, to read the pointer.
+    geometry: Rc<Cell<Option<Geometry>>>,
+    /// The pointer over the chart: window position and roast second.
+    hover: Option<(Point<Pixels>, f64)>,
+    /// The chart's click menu, when open.
+    menu: Option<Menu>,
+    menu_note: Entity<InputState>,
+    /// Keeps the menu note's Enter handler alive.
+    subscriptions: Vec<Subscription>,
+}
+
+/// The chart's click menu: an instant to mark an event or add a note on.
+#[derive(Debug, Clone, Copy)]
+struct Menu {
+    position: Point<Pixels>,
+    at: Millis,
+    /// Clicked ahead of the latest reading: the menu acts on "now".
+    ahead: bool,
 }
 
 impl RoastScreen {
@@ -50,11 +73,26 @@ impl RoastScreen {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
+        let menu_note = cx.new(|cx| InputState::new(window, cx));
+        let enter = cx.subscribe_in(
+            &menu_note,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.menu_add_note(window, cx);
+                }
+            },
+        );
         let screen = Self {
             state: LiveState::new(time_scale),
             engine,
             note: cx.new(|cx| InputState::new(window, cx)),
             message: None,
+            geometry: Rc::new(Cell::new(None)),
+            hover: None,
+            menu: None,
+            menu_note,
+            subscriptions: vec![enter],
         };
         cx.spawn(async move |this, cx| follow(this, cx).await)
             .detach();
@@ -141,6 +179,189 @@ impl RoastScreen {
         }
     }
 
+    fn pointer_moved(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
+        let hover = self
+            .geometry
+            .get()
+            .and_then(|g| g.roast_s(position))
+            .map(|s| (position, s));
+        if hover.map(|h| h.1) != self.hover.map(|h| h.1) {
+            self.hover = hover;
+            cx.notify();
+        }
+    }
+
+    /// Clicking the chart opens the menu on that instant (or on "now", when
+    /// clicked ahead of the latest reading). Only during or after a roast.
+    fn pointer_down(
+        &mut self,
+        position: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Some(s) = self.geometry.get().and_then(|g| g.roast_s(position)) else {
+            return;
+        };
+        if self.state.roast.is_none() {
+            return;
+        }
+        let Some(at) = self.state.wall_at(s) else {
+            return;
+        };
+        let ahead = self.state.now().is_some_and(|now| at >= now);
+        self.menu = Some(Menu {
+            position,
+            at,
+            ahead,
+        });
+        self.hover = None;
+        self.menu_note = cx.new(|cx| InputState::new(window, cx));
+        let enter = cx.subscribe_in(
+            &self.menu_note,
+            window,
+            |this, _, event: &InputEvent, window, cx| {
+                if matches!(event, InputEvent::PressEnter { .. }) {
+                    this.menu_add_note(window, cx);
+                }
+            },
+        );
+        self.subscriptions = vec![enter];
+        cx.notify();
+    }
+
+    fn mark_at(&mut self, kind: EventKind, at: Millis, cx: &mut Context<Self>) {
+        let Some(roast) = self.state.roast.as_ref() else {
+            return;
+        };
+        let id = roastro::RoastId(roast.id);
+        self.menu = None;
+        self.send(
+            |r| {
+                Request::Edit(Edit::SetEvent(
+                    id,
+                    kind.as_str().to_owned(),
+                    EventIn { at },
+                    r,
+                ))
+            },
+            cx,
+        );
+    }
+
+    fn menu_add_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let (Some(menu), Some(roast)) = (self.menu, self.state.roast.as_ref()) else {
+            return;
+        };
+        let text = self.menu_note.read(cx).value().to_string();
+        if text.trim().is_empty() {
+            return;
+        }
+        let id = roastro::RoastId(roast.id);
+        self.menu = None;
+        self.send(
+            |r| Request::Edit(Edit::AddNote(id, NoteIn { at: menu.at, text }, r)),
+            cx,
+        );
+        self.menu_note = cx.new(|cx| InputState::new(window, cx));
+    }
+
+    /// The card that follows the pointer over the chart.
+    fn hover_overlay(&self) -> Option<AnyElement> {
+        let (position, s) = self.hover?;
+        let card = hover_card(&self.state, s)?;
+        Some(
+            deferred(
+                anchored()
+                    .position(position + point(px(16.), px(16.)))
+                    .snap_to_window_with_margin(px(8.))
+                    .child(card),
+            )
+            .into_any_element(),
+        )
+    }
+
+    fn menu_overlay(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
+        let menu = self.menu?;
+        let st = &self.state;
+        let s = st.roast_s(menu.at);
+        let bt_then = st.sample_near(s).and_then(|x| x.values.get("bt").copied());
+        let title = if menu.ahead {
+            format!("now · {}", clock_signed(s))
+        } else {
+            clock_signed(s)
+        };
+        let buttons = [
+            EventKind::DryEnd,
+            EventKind::FirstCrack,
+            EventKind::SecondCrack,
+        ]
+        .into_iter()
+        .map(|kind| {
+            let hint = match kind {
+                EventKind::DryEnd => "  color change",
+                EventKind::FirstCrack => "  first pops",
+                _ => "",
+            };
+            let was = st
+                .event_at(kind)
+                .map(|at| format!("   was {}", clock_signed(st.roast_s(at))))
+                .unwrap_or_default();
+            Button::new(SharedString::from(format!("menu-{}", kind.as_str())))
+                .label(format!("{}{hint}{was}", chart::label(kind)))
+                .w_full()
+                .on_click(cx.listener(move |this, _, _, cx| this.mark_at(kind, menu.at, cx)))
+        });
+        let panel = div()
+            .id("chart-menu")
+            .test_support()
+            .occlude()
+            .w(px(320.))
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .rounded_lg()
+            .bg(rgb(0x0018_1a1f))
+            .border_1()
+            .border_color(white(0.12))
+            .shadow_lg()
+            .on_mouse_down_out(cx.listener(|this, _, _, cx| {
+                this.menu = None;
+                cx.notify();
+            }))
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .child(div().font_weight(FontWeight::BOLD).child(title))
+                    .child(
+                        div()
+                            .text_sm()
+                            .text_color(chart::bt())
+                            .child(format!("BT {}°", fmt1(bt_then))),
+                    ),
+            )
+            .children(buttons)
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(Input::new(&self.menu_note).id("menu-note").flex_1())
+                    .child(Button::new("menu-add-note").label("Add note").on_click(
+                        cx.listener(|this, _, window, cx| this.menu_add_note(window, cx)),
+                    )),
+            );
+        Some(
+            deferred(
+                anchored()
+                    .position(menu.position + point(px(12.), px(12.)))
+                    .snap_to_window_with_margin(px(8.))
+                    .child(panel),
+            )
+            .into_any_element(),
+        )
+    }
+
     fn add_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.note.read(cx).value().to_string();
         let (Some(roast), Some(at)) = (self.state.roast.as_ref(), self.state.now()) else {
@@ -181,6 +402,150 @@ fn clock(s: f64) -> String {
     #[allow(clippy::cast_possible_truncation)]
     let s = s.max(0.0) as i64;
     format!("{}:{:02}", s / 60, s % 60)
+}
+
+/// `m:ss`, with a minus sign before Charge.
+fn clock_signed(s: f64) -> String {
+    if s < 0.0 {
+        format!("−{}", clock(-s))
+    } else {
+        clock(s)
+    }
+}
+
+/// What the hover card shows at one roast second: live values against the
+/// reference, gas and air, and any event or note right there.
+#[allow(clippy::too_many_lines)] // one card, built top to bottom
+fn hover_card(st: &LiveState, s: f64) -> Option<impl IntoElement> {
+    let live = st.sample_near(s);
+    let reference = st.reference_near(s);
+    if live.is_none() && reference.is_none() {
+        return None;
+    }
+    let value = |k: &str| live.and_then(|x| x.values.get(k).copied());
+    let reference = reference.unwrap_or((None, None)); // (BT, ET)
+    let ror = live
+        .and_then(|x| x.ror)
+        .filter(|_| st.event_at(EventKind::TurningPoint).is_some());
+    let title = if st.roast.is_none() {
+        if s.abs() < 0.5 {
+            "now".to_owned()
+        } else {
+            format!("{} ago", clock(-s))
+        }
+    } else {
+        clock_signed(s)
+    };
+    let cell = |text: String, color: Hsla| {
+        div()
+            .w(px(56.))
+            .flex()
+            .justify_end()
+            .text_color(color)
+            .child(text)
+    };
+    let row = |name: &'static str, now: Option<f64>, then: Option<f64>, color: Hsla| {
+        div()
+            .flex()
+            .text_sm()
+            .child(div().w(px(36.)).text_color(white(0.5)).child(name))
+            .child(cell(fmt1(now), color))
+            .child(cell(
+                then.map_or_else(String::new, |v| format!("{v:.1}")),
+                white(0.45),
+            ))
+            .child(cell(
+                now.zip(then)
+                    .map_or_else(String::new, |(a, b)| format!("{:+.1}", a - b)),
+                white(0.7),
+            ))
+    };
+    let tolerance = |window_s: f64| move |at: Millis| (st.roast_s(at) - s).abs() <= window_s;
+    let near_event = tolerance(2.0);
+    let near_note = tolerance(3.0);
+    let events: Vec<String> = st
+        .roast
+        .iter()
+        .flat_map(|r| r.events.iter())
+        .filter(|e| near_event(e.at))
+        .map(|e| {
+            format!(
+                "{} · {}",
+                e.kind.parse::<EventKind>().map_or(e.kind, chart::label),
+                clock_signed(st.roast_s(e.at))
+            )
+        })
+        .collect();
+    let notes: Vec<String> = st
+        .roast
+        .iter()
+        .flat_map(|r| r.notes.iter())
+        .filter(|n| near_note(n.at))
+        .map(|n| format!("“{}”", n.text))
+        .collect();
+    let hint =
+        (live.is_some() && st.roast.is_some()).then_some("Click to mark an event or add a note");
+    Some(
+        div()
+            .w(px(240.))
+            .p_3()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .rounded_lg()
+            .bg(rgb(0x0018_1a1f))
+            .border_1()
+            .border_color(white(0.12))
+            .shadow_lg()
+            .child(
+                div()
+                    .flex()
+                    .justify_between()
+                    .child(div().font_weight(FontWeight::BOLD).child(title))
+                    .children(live.is_none().then(|| {
+                        div()
+                            .text_xs()
+                            .text_color(white(0.45))
+                            .child("reference only")
+                    })),
+            )
+            .child(
+                div()
+                    .flex()
+                    .text_xs()
+                    .text_color(white(0.35))
+                    .child(div().w(px(36.)))
+                    .child(cell("now".into(), white(0.35)))
+                    .child(cell("ref".into(), white(0.35)))
+                    .child(cell("diff".into(), white(0.35))),
+            )
+            .child(row("BT", value("bt"), reference.0, chart::bt()))
+            .child(row("ET", value("et"), reference.1, chart::et()))
+            .child(row("RoR", ror, None, chart::ror()))
+            .children(live.map(|_| {
+                div()
+                    .flex()
+                    .gap_4()
+                    .text_sm()
+                    .child(
+                        div()
+                            .text_color(chart::gas())
+                            .child(format!("gas {}%", fmt0(value("gas_fb")))),
+                    )
+                    .child(
+                        div()
+                            .text_color(chart::air())
+                            .child(format!("air {}%", fmt0(value("fan")))),
+                    )
+            }))
+            .children(
+                events
+                    .into_iter()
+                    .map(|e| div().text_sm().text_color(chart::bt()).child(e)),
+            )
+            .children(notes.into_iter().map(|n| div().text_sm().child(n)))
+            .children(hint.map(|h| div().text_xs().text_color(white(0.35)).child(h))),
+    )
 }
 
 fn fmt1(v: Option<f64>) -> String {
@@ -227,6 +592,12 @@ fn readout(
 impl Render for RoastScreen {
     #[allow(clippy::too_many_lines)] // the screen's layout, read top to bottom
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let hover_overlay = if self.menu.is_none() {
+            self.hover_overlay()
+        } else {
+            None
+        };
+        let menu_overlay = self.menu_overlay(cx);
         let st = &self.state;
         let last = st.last();
         let value = |k: &str| last.and_then(|s| s.values.get(k).copied());
@@ -342,6 +713,8 @@ impl Render for RoastScreen {
             .flex()
             .bg(rgb(0x000b_0c0e))
             .text_color(white(0.92))
+            .children(hover_overlay)
+            .children(menu_overlay)
             .child(
                 div()
                     .flex_1()
@@ -374,7 +747,33 @@ impl Render for RoastScreen {
                                 reference.map(|r| div().text_sm().text_color(white(0.5)).child(r)),
                             ),
                     )
-                    .child(div().flex_1().w_full().child(chart::chart(st))),
+                    .child(
+                        div()
+                            .id("chart")
+                            .test_support()
+                            .flex_1()
+                            .w_full()
+                            .on_mouse_move(cx.listener(|this, ev: &MouseMoveEvent, _, cx| {
+                                this.pointer_moved(ev.position, cx);
+                            }))
+                            .on_hover(cx.listener(|this, hovered: &bool, _, cx| {
+                                if !hovered {
+                                    this.hover = None;
+                                    cx.notify();
+                                }
+                            }))
+                            .on_mouse_down(
+                                MouseButton::Left,
+                                cx.listener(|this, ev: &MouseDownEvent, window, cx| {
+                                    this.pointer_down(ev.position, window, cx);
+                                }),
+                            )
+                            .child(chart::chart(
+                                st,
+                                self.geometry.clone(),
+                                self.hover.map(|h| h.1),
+                            )),
+                    ),
             )
             .child(
                 div()
@@ -618,10 +1017,10 @@ mod tests {
         while let Ok(req) = rx.try_recv() {
             match req {
                 Request::Edit(Edit::SetEvent(roast, kind, body, _)) => {
-                    seen.push(format!("event {kind} at {} on {}", body.at, roast.0 == id))
+                    seen.push(format!("event {kind} at {} on {}", body.at, roast.0 == id));
                 }
                 Request::Edit(Edit::AddNote(_, note, _)) => {
-                    seen.push(format!("note {:?} at {}", note.text, note.at))
+                    seen.push(format!("note {:?} at {}", note.text, note.at));
                 }
                 _ => seen.push("other".into()),
             }
@@ -633,5 +1032,109 @@ mod tests {
                 "note \"smell of bread\" at 2000"
             ]
         );
+    }
+
+    #[gpui_kit::test]
+    fn hovering_and_clicking_the_chart(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (tx, mut rx) = mpsc::channel(16);
+        let (handle, screen) = cx.update(|cx| {
+            let options = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds {
+                    origin: Point::default(),
+                    size: size(px(1440.), px(900.)),
+                })),
+                ..Default::default()
+            };
+            gpui_kit::open_window(options, cx, |window, cx| {
+                cx.new(|cx| RoastScreen::new(Engine(tx), 1.0, window, cx))
+            })
+            .unwrap()
+        });
+        cx.run_until_parked();
+        let _subscribe = rx.try_recv();
+        let id = Uuid::now_v7();
+        cx.update(|cx| {
+            screen.update(cx, |s, cx| {
+                s.apply(&Live::Roast(recording_roast(id)), cx);
+                for at in (0..=300).map(|t| t * 1000) {
+                    let values =
+                        HashMap::from([("bt".to_owned(), 100.0), ("et".to_owned(), 180.0)]);
+                    s.apply(
+                        &Live::Sample(SampleOut {
+                            at,
+                            values,
+                            ror: None,
+                        }),
+                        cx,
+                    );
+                }
+            });
+        });
+
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.hover("chart", cx);
+        })
+        .unwrap();
+        assert!(
+            cx.update(|cx| screen.read(cx).hover.is_some()),
+            "the pointer is tracked over the chart"
+        );
+
+        cx.update_window(handle, |_, window, cx| {
+            window.click("chart", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("chart-menu").is_some(),
+                "a click opens the menu"
+            );
+            window.click("menu-first_crack", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        match rx.try_recv() {
+            Ok(Request::Edit(Edit::SetEvent(roast, kind, body, _))) => {
+                assert_eq!(
+                    (roast.0, kind.as_str(), body.at),
+                    (id, "first_crack", 300_000),
+                    "clicked ahead of the curve: now"
+                );
+            }
+            Ok(other) => panic!("expected First crack, got {}", name(&other)),
+            Err(e) => panic!("the menu sent nothing: {e:?}"),
+        }
+
+        cx.update_window(handle, |_, window, cx| {
+            window.click("chart", cx);
+            window.render_frame(cx);
+            window.click("menu-note", cx);
+            window.input("gas 70", cx);
+            window.press("enter", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        match rx.try_recv() {
+            Ok(Request::Edit(Edit::AddNote(_, note, _))) => assert_eq!(note.text, "gas 70"),
+            _ => panic!("Enter in the menu did not add the note"),
+        }
+        assert!(
+            cx.update(|cx| screen.read(cx).menu.is_none()),
+            "the menu closes after an action"
+        );
+    }
+
+    fn name(req: &Request) -> &'static str {
+        match req {
+            Request::Poll { .. } => "poll",
+            Request::Subscribe(_) => "subscribe",
+            Request::Charge(_) => "charge",
+            Request::Drop(_) => "drop",
+            Request::Roast(..) => "roast",
+            Request::Samples(..) => "samples",
+            Request::Edit(Edit::SetEvent(..)) => "set event",
+            Request::Edit(Edit::AddNote(..)) => "add note",
+            Request::Edit(_) => "other edit",
+        }
     }
 }

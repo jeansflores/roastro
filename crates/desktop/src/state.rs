@@ -125,6 +125,43 @@ impl LiveState {
         (at - zero) as f64 * self.time_scale / 1000.0
     }
 
+    /// The wall-clock instant of a roast second, never after the latest
+    /// reading.
+    #[must_use]
+    pub fn wall_at(&self, roast_s: f64) -> Option<Millis> {
+        let now = self.now()?;
+        let zero = self.roast.as_ref().and_then(|r| r.charge_at).unwrap_or(now);
+        #[allow(clippy::cast_possible_truncation)] // roast seconds to ms
+        let at = zero + (roast_s * 1000.0 / self.time_scale).round() as Millis;
+        Some(at.min(now))
+    }
+
+    /// The reading closest to a roast second, if one is near enough (not
+    /// across a Gap).
+    #[must_use]
+    pub fn sample_near(&self, roast_s: f64) -> Option<&SampleOut> {
+        let reach = 2.5 * self.time_scale;
+        self.samples
+            .iter()
+            .min_by(|a, b| {
+                (self.roast_s(a.at) - roast_s)
+                    .abs()
+                    .total_cmp(&(self.roast_s(b.at) - roast_s).abs())
+            })
+            .filter(|s| (self.roast_s(s.at) - roast_s).abs() <= reach)
+    }
+
+    /// The reference roast's BT and ET closest to a roast second.
+    #[must_use]
+    pub fn reference_near(&self, roast_s: f64) -> Option<(Option<f64>, Option<f64>)> {
+        let points = &self.reference.as_ref()?.points;
+        points
+            .iter()
+            .min_by(|a, b| (a.0 - roast_s).abs().total_cmp(&(b.0 - roast_s).abs()))
+            .filter(|p| (p.0 - roast_s).abs() <= 30.0)
+            .map(|p| (p.1, p.2))
+    }
+
     /// When a roast event happened, if it did.
     #[must_use]
     pub fn event_at(&self, kind: EventKind) -> Option<Millis> {
@@ -337,5 +374,34 @@ mod tests {
             r.points,
             [(0.0, Some(200.0), None), (60.0, Some(90.0), None)]
         );
+    }
+}
+
+#[cfg(test)]
+mod pointer_tests {
+    use std::collections::HashMap;
+
+    use super::*;
+
+    #[test]
+    #[allow(clippy::cast_precision_loss)] // small test seconds
+    fn maps_roast_seconds_to_readings_and_instants() {
+        let mut s = LiveState::new(10.0);
+        for t in 0..10 {
+            s.samples.push(SampleOut {
+                at: t * 1000,
+                values: HashMap::from([("bt".to_owned(), 100.0 + t as f64)]),
+                ror: None,
+            });
+        }
+        // Waiting: zero is now (9 s wall); at 10x one wall second is ten roast seconds.
+        assert_eq!(s.wall_at(-20.0), Some(7000));
+        assert_eq!(
+            s.wall_at(50.0),
+            Some(9000),
+            "never after the latest reading"
+        );
+        assert_eq!(s.sample_near(-31.0).map(|x| x.at), Some(6000));
+        assert!(s.sample_near(-500.0).is_none(), "too far from any reading");
     }
 }
