@@ -10,12 +10,14 @@ use gpui_kit::component::input::{Input, InputState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::prelude::*;
 use gpui_kit::{
-    AnyElement, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement, SharedString,
-    Subscription, Window, div, px, rgb,
+    AnyElement, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement, PathPromptOptions,
+    SharedString, Subscription, Window, div, px, rgb,
 };
 use roastro::engine::{Edit, Request};
 use roastro::machine::{CALORATTO, MODELS};
-use roastro::wire::{LinkDropOut, LinkState, MachineIn, TestOut};
+use std::path::PathBuf;
+
+use roastro::wire::{BackupOut, LinkDropOut, LinkState, MachineIn, TestOut};
 
 use crate::chart;
 use crate::new_roast::GoLive;
@@ -97,10 +99,16 @@ pub struct MachinePage {
     test: Option<Result<TestOut, String>>,
     drops: Vec<LinkDropOut>,
     message: Option<String>,
+    /// A backup chosen to restore, with what it holds, waiting for a yes.
+    pending_restore: Option<(PathBuf, BackupOut)>,
     _subscriptions: Vec<Subscription>,
 }
 
+/// Everything was replaced by a backup: the other pages read again.
+pub struct Restored;
+
 impl EventEmitter<GoLive> for MachinePage {}
+impl EventEmitter<Restored> for MachinePage {}
 
 impl MachinePage {
     pub fn new(
@@ -145,6 +153,7 @@ impl MachinePage {
             test: None,
             drops: Vec::new(),
             message: None,
+            pending_restore: None,
             _subscriptions: subscriptions,
         };
         page.load_drops(cx);
@@ -223,6 +232,164 @@ impl MachinePage {
             .ok()
         })
         .detach();
+    }
+
+    fn say(&mut self, text: String, cx: &mut Context<Self>) {
+        self.message = Some(text);
+        cx.notify();
+    }
+
+    /// Saves a copy of everything where the person chooses.
+    fn back_up(&mut self, cx: &mut Context<Self>) {
+        let dir = dirs::document_dir()
+            .or_else(dirs::home_dir)
+            .unwrap_or_default();
+        let today = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
+        let chosen = cx.prompt_for_new_path(&dir, Some(&format!("roastro-backup-{today}.db")));
+        let engine = self.engine.clone();
+        cx.spawn(async move |this, cx| {
+            let path = chosen.await.ok()?.ok()??;
+            let reply = engine.ask(|r| Request::Edit(Edit::BackUp(path.clone(), r)))?;
+            let result = reply.await.ok()?;
+            this.update(cx, |this, cx| {
+                let text = match result {
+                    Ok(b) => format!("Backed up {} roasts to {}", b.roasts, path.display()),
+                    Err(err) => message_of(&err),
+                };
+                this.say(text, cx);
+            })
+            .ok()
+        })
+        .detach();
+    }
+
+    /// Picks a backup and shows what it holds before asking to restore it.
+    fn choose_backup(&mut self, cx: &mut Context<Self>) {
+        let chosen = cx.prompt_for_paths(PathPromptOptions {
+            files: true,
+            directories: false,
+            multiple: false,
+            prompt: Some("Restore".into()),
+        });
+        let engine = self.engine.clone();
+        cx.spawn(async move |this, cx| {
+            let path = chosen.await.ok()?.ok()??.into_iter().next()?;
+            let reply = engine.ask(|r| Request::Edit(Edit::InspectBackup(path.clone(), r)))?;
+            let result = reply.await.ok()?;
+            this.update(cx, |this, cx| match result {
+                Ok(info) => {
+                    this.pending_restore = Some((path, info));
+                    cx.notify();
+                }
+                Err(err) => this.say(message_of(&err), cx),
+            })
+            .ok()
+        })
+        .detach();
+    }
+
+    fn restore(&mut self, cx: &mut Context<Self>) {
+        let Some((path, _)) = self.pending_restore.take() else {
+            return;
+        };
+        let Some(reply) = self
+            .engine
+            .ask(|r| Request::Edit(Edit::RestoreBackup(path, r)))
+        else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let result = reply.await.ok()?;
+            this.update(cx, |this, cx| match result {
+                Ok(b) => {
+                    this.say(format!("Restored: {} roasts.", b.roasts), cx);
+                    this.load_drops(cx);
+                    cx.emit(Restored);
+                }
+                Err(err) => this.say(message_of(&err), cx),
+            })
+            .ok()
+        })
+        .detach();
+    }
+
+    fn backup_card(&self, recording: bool, cx: &mut Context<Self>) -> impl IntoElement {
+        let confirm = self.pending_restore.as_ref().map(|(path, info)| {
+            let last = info
+                .last_charge_at
+                .map_or_else(String::new, |at| format!(", the last on {}", day(at)));
+            div()
+                .id("restore-confirm")
+                .test_support()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_3()
+                .rounded_md()
+                .border_1()
+                .border_color(rgb(0x00f8_7171))
+                .child(div().text_sm().child(format!(
+                    "{} holds {} roasts{last} and {} coffees.",
+                    path.display(),
+                    info.roasts,
+                    info.coffees
+                )))
+                .child(div().text_sm().text_color(white(0.8)).child(
+                    "Restoring replaces everything on this laptop: roasts, coffees and the machine settings. Back up first if unsure.",
+                ))
+                .child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            Button::new("confirm-restore")
+                                .danger()
+                                .label("Replace everything with this backup")
+                                .disabled(recording)
+                                .on_click(cx.listener(|this, _, _, cx| this.restore(cx))),
+                        )
+                        .child(Button::new("cancel-restore").label("Cancel").on_click(
+                            cx.listener(|this, _, _, cx| {
+                                this.pending_restore = None;
+                                cx.notify();
+                            }),
+                        )),
+                )
+        });
+        div()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(label("Backup"))
+            .child(
+                div()
+                    .text_sm()
+                    .text_color(white(0.55))
+                    .child("A copy of every roast, coffee and setting, saved where you choose: a pen drive or a synced folder."),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap_2()
+                    .child(
+                        Button::new("back-up")
+                            .label("Back up")
+                            .on_click(cx.listener(|this, _, _, cx| this.back_up(cx))),
+                    )
+                    .child(
+                        Button::new("restore")
+                            .label("Restore…")
+                            .disabled(recording)
+                            .on_click(cx.listener(|this, _, _, cx| this.choose_backup(cx))),
+                    ),
+            )
+            .children(recording.then(|| {
+                div()
+                    .text_xs()
+                    .text_color(white(0.45))
+                    .child("Restoring waits for the roast to finish.")
+            }))
+            .children(confirm)
     }
 
     fn retry(&mut self, cx: &mut Context<Self>) {
@@ -642,6 +809,7 @@ impl Render for MachinePage {
                             }),
                     )
             }))
+            .child(self.backup_card(recording, cx))
             .child(
                 div()
                     .flex()

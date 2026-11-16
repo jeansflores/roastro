@@ -12,8 +12,8 @@ use uuid::Uuid;
 use super::{Edit, Engine};
 use crate::api::ApiError;
 use crate::wire::{
-    CoffeeIn, CoffeeOut, CoffeePatch, Live, NextRoastIn, NextRoastOut, NoteIn, NoteOut, NotePatch,
-    RoastDoc, RoastPage, RoastPatchIn, RoastQueryIn,
+    BackupOut, CoffeeIn, CoffeeOut, CoffeePatch, Live, NextRoastIn, NextRoastOut, NoteIn, NoteOut,
+    NotePatch, RoastDoc, RoastPage, RoastPatchIn, RoastQueryIn,
 };
 
 /// Roasts per page of `GET /api/roasts`.
@@ -80,6 +80,19 @@ impl Engine {
                 let _ = reply.send(self.set_machine(&body));
             }
             Edit::TestMachine(body, reply) => self.test_machine(&body, reply),
+            Edit::BackUp(path, reply) => {
+                let _ = reply.send(self.back_up(&path));
+            }
+            Edit::InspectBackup(path, reply) => {
+                let _ = reply.send(
+                    store::Store::inspect_backup(&path)
+                        .map(BackupOut::from)
+                        .map_err(|e| Self::backup_error(&e)),
+                );
+            }
+            Edit::RestoreBackup(path, reply) => {
+                let _ = reply.send(self.restore(&path));
+            }
         }
     }
 

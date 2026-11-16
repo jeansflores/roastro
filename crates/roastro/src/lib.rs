@@ -213,6 +213,10 @@ fn idle(command: LinkCommand, target: &mut Option<Target>, demo: Option<&DemoHoo
             tokio::spawn(test(t, demo.cloned(), reply));
             false
         }
+        LinkCommand::Disconnect => {
+            *target = None;
+            false
+        }
     }
 }
 
@@ -283,6 +287,10 @@ async fn link(
                     Some(LinkCommand::RetryNow) => break,
                     Some(LinkCommand::Connect(t)) => {
                         target = Some(t);
+                        break;
+                    }
+                    Some(LinkCommand::Disconnect) => {
+                        target = None;
                         break;
                     }
                 },
