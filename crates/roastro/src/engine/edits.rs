@@ -89,7 +89,7 @@ impl Engine {
     fn changed(&self, id: RoastId) -> Result<RoastDoc, ApiError> {
         let doc = self.doc(id)?;
         if self.shown == Some(id) {
-            self.publish(&Live::Roast(self.doc(id)?));
+            self.publish(Live::Roast(self.doc(id)?));
         }
         Ok(doc)
     }
@@ -326,7 +326,7 @@ impl Engine {
             .set_next_roast(&next)
             .map_err(ApiError::internal)?;
         let out = self.next_roast()?;
-        self.publish(&Live::NextRoast(self.next_roast()?));
+        self.publish(Live::NextRoast(self.next_roast()?));
         Ok(out)
     }
 
