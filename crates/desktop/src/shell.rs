@@ -14,6 +14,9 @@ use gpui_kit::{
 };
 use i18n::{t, tf};
 
+use std::time::Duration;
+
+use gpui_kit::{Animation, AnimationExt as _, ease_in_out};
 use roastro::alarm::Alarm;
 use roastro::wire::LinkState;
 use uuid::Uuid;
@@ -27,6 +30,10 @@ use crate::roast_detail::{Back, RoastDetail};
 use crate::roasts::{OpenRoast, RoastsPage};
 use crate::state::LiveState;
 use crate::view::{Engine, OpenNewRoast, RoastScreen, clock, fmt1, white};
+
+/// The sidebar's width, open and folded into the icon rail.
+const SIDEBAR_W: f32 = 232.;
+const RAIL_W: f32 = 56.;
 
 /// Where the app is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -280,7 +287,7 @@ impl Shell {
         div()
             .id("sidebar")
             .test_support()
-            .w(px(232.))
+            .w(px(SIDEBAR_W))
             .h_full()
             .flex_none()
             .flex()
@@ -347,7 +354,7 @@ impl Shell {
         div()
             .id("sidebar-rail")
             .test_support()
-            .w(px(56.))
+            .w(px(RAIL_W))
             .h_full()
             .flex_none()
             .flex()
@@ -632,6 +639,7 @@ fn link_error(st: &LiveState) -> String {
 }
 
 impl Render for Shell {
+    #[allow(clippy::too_many_lines)] // the window's frame, read top to bottom
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let st = self.live.read(cx).state.clone();
         let alarms = active_alarms(&st);
@@ -665,11 +673,41 @@ impl Render for Shell {
             Page::NewRoast => self.new_roast.clone().into_any_element(),
             Page::Machine => self.machine.clone().into_any_element(),
         };
-        let nav = if self.page == Page::Live {
-            self.rail(&st, cx).into_any_element()
+        // The sidebar folds into the rail on Live roast and opens again
+        // elsewhere: its width moves, its content is clipped meanwhile.
+        let (from, to, nav, key) = if self.page == Page::Live {
+            (
+                SIDEBAR_W,
+                RAIL_W,
+                self.rail(&st, cx).into_any_element(),
+                "nav-fold",
+            )
         } else {
-            self.sidebar(&st, cx).into_any_element()
+            (
+                RAIL_W,
+                SIDEBAR_W,
+                self.sidebar(&st, cx).into_any_element(),
+                "nav-open",
+            )
         };
+        let nav = div()
+            .id(key)
+            .h_full()
+            .flex_none()
+            .overflow_hidden()
+            .bg(rgb(0x0012_1317))
+            .child(nav)
+            .with_animation(
+                key,
+                Animation::new(Duration::from_millis(180)).with_easing(ease_in_out),
+                move |el, d| el.w(px(from + (to - from) * d)),
+            );
+        // Each page fades in.
+        let page = div().size_full().child(page).with_animation(
+            SharedString::from(format!("page-in-{:?}", self.page)),
+            Animation::new(Duration::from_millis(150)),
+            Styled::opacity,
+        );
         div()
             .id("shell")
             .size_full()
@@ -685,8 +723,9 @@ impl Render for Shell {
                     .flex()
                     .flex_col()
                     .children(alarms.iter().map(|alarm| {
+                        let id = SharedString::from(format!("alarm-{}", alarm.point()));
                         div()
-                            .id(SharedString::from(format!("alarm-{}", alarm.point())))
+                            .id(id.clone())
                             .test_support()
                             .flex_none()
                             .flex()
@@ -701,6 +740,11 @@ impl Render for Shell {
                                     .child(format!("{}:", alarm.name())),
                             )
                             .child(alarm.advice())
+                            .with_animation(
+                                id,
+                                Animation::new(Duration::from_millis(200)).with_easing(ease_in_out),
+                                |el, d| el.opacity(d).mt(px(-8. * (1. - d))),
+                            )
                     }))
                     .child(div().flex_1().min_h_0().child(page)),
             )
@@ -728,6 +772,8 @@ mod tests {
 
     fn open(cx: &mut TestAppContext) -> (AnyWindowHandle, Entity<Shell>, mpsc::Receiver<Request>) {
         cx.update(gpui_kit::init);
+        // No animations in tests: every frame is the final one.
+        cx.update(|cx| cx.set_reduce_motion(true));
         let (tx, rx) = mpsc::channel(64);
         let (handle, shell) = cx.update(|cx| {
             let options = WindowOptions {
@@ -1388,5 +1434,39 @@ mod tests {
         })
         .unwrap();
         assert_eq!(i18n::current(), i18n::Lang::En);
+    }
+
+    #[gpui_kit::test]
+    fn the_sidebar_opens_and_folds_with_motion_on(cx: &mut TestAppContext) {
+        let (handle, shell, _rx) = open(cx);
+        cx.update(|cx| cx.set_reduce_motion(false));
+        let settle = |cx: &mut TestAppContext| {
+            cx.executor()
+                .advance_clock(std::time::Duration::from_millis(300));
+            cx.run_until_parked();
+            cx.update_window(handle, |_, window, cx| window.render_frame(cx))
+                .unwrap();
+        };
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("rail-roasts", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        settle(cx);
+        cx.update_window(handle, |_, window, cx| window.click("nav-coffees", cx))
+            .unwrap();
+        settle(cx);
+        assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Coffees);
+        cx.update_window(handle, |_, window, cx| window.click("nav-live", cx))
+            .unwrap();
+        settle(cx);
+        cx.update_window(handle, |_, window, cx| window.click("rail-machine", cx))
+            .unwrap();
+        assert_eq!(
+            cx.update(|cx| shell.read(cx).page),
+            Page::Machine,
+            "the rail works after folding"
+        );
     }
 }
