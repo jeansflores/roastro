@@ -16,6 +16,7 @@ use gpui_kit::{
 use uuid::Uuid;
 
 use crate::chart;
+use crate::compare::{ComparePage, CompareRoasts};
 use crate::roast_detail::{Back, RoastDetail};
 use crate::roasts::{OpenRoast, RoastsPage};
 use crate::state::LiveState;
@@ -28,6 +29,8 @@ pub enum Page {
     Roasts,
     /// One roast, opened from Roasts or after its Drop.
     Roast,
+    /// Several roasts side by side.
+    Compare,
     Coffees,
     Machine,
 }
@@ -38,7 +41,7 @@ impl Page {
     fn title(self) -> &'static str {
         match self {
             Self::Live => "Live roast",
-            Self::Roasts | Self::Roast => "Roasts",
+            Self::Roasts | Self::Roast | Self::Compare => "Roasts",
             Self::Coffees => "Coffees",
             Self::Machine => "Machine",
         }
@@ -47,7 +50,7 @@ impl Page {
     fn id(self) -> &'static str {
         match self {
             Self::Live => "live",
-            Self::Roasts | Self::Roast => "roasts",
+            Self::Roasts | Self::Roast | Self::Compare => "roasts",
             Self::Coffees => "coffees",
             Self::Machine => "machine",
         }
@@ -56,7 +59,7 @@ impl Page {
     fn icon(self) -> Icon {
         match self {
             Self::Live => Icon::new(Lucide::Flame),
-            Self::Roasts | Self::Roast => Icon::new(Lucide::ChartSpline),
+            Self::Roasts | Self::Roast | Self::Compare => Icon::new(Lucide::ChartSpline),
             Self::Coffees => Icon::new(Lucide::Coffee),
             Self::Machine => Icon::new(IconName::Cpu),
         }
@@ -75,11 +78,15 @@ pub struct Shell {
     roasts: Entity<RoastsPage>,
     /// The roast opened last.
     detail: Option<Entity<RoastDetail>>,
+    /// The comparison opened last.
+    compare: Option<Entity<ComparePage>>,
     /// Whether a roast was recording at the last look: when that changes,
     /// the list has a roast more.
     was_recording: bool,
     _subscriptions: Vec<Subscription>,
     detail_back: Option<Subscription>,
+    detail_compare: Option<Subscription>,
+    compare_open: Option<Subscription>,
 }
 
 impl Shell {
@@ -107,6 +114,13 @@ impl Shell {
             cx.subscribe_in(&live, window, |this, _, open: &OpenRoast, window, cx| {
                 this.open(open.0, window, cx);
             }),
+            cx.subscribe_in(
+                &roasts,
+                window,
+                |this, _, ids: &CompareRoasts, window, cx| {
+                    this.compare(ids.0.clone(), window, cx);
+                },
+            ),
         ];
         Self {
             engine,
@@ -115,9 +129,12 @@ impl Shell {
             live,
             roasts,
             detail: None,
+            compare: None,
             was_recording: false,
             _subscriptions: subscriptions,
             detail_back: None,
+            detail_compare: None,
+            compare_open: None,
         }
     }
 
@@ -130,8 +147,27 @@ impl Shell {
             this.roasts.update(cx, RoastsPage::reload);
             this.go(Page::Roasts, cx);
         }));
+        self.detail_compare = Some(cx.subscribe_in(
+            &detail,
+            window,
+            |this, _, ids: &CompareRoasts, window, cx| this.compare(ids.0.clone(), window, cx),
+        ));
         self.detail = Some(detail);
         self.go(Page::Roast, cx);
+    }
+
+    /// Opens the Compare page on these roasts.
+    fn compare(&mut self, ids: Vec<Uuid>, window: &mut Window, cx: &mut Context<Self>) {
+        let engine = self.engine.clone();
+        let time_scale = self.time_scale;
+        let page = cx.new(|cx| ComparePage::new(engine, ids, time_scale, cx));
+        self.compare_open = Some(cx.subscribe_in(
+            &page,
+            window,
+            |this, _, open: &OpenRoast, window, cx| this.open(open.0, window, cx),
+        ));
+        self.compare = Some(page);
+        self.go(Page::Compare, cx);
     }
 
     fn go(&mut self, page: Page, cx: &mut Context<Self>) {
@@ -434,6 +470,10 @@ impl Render for Shell {
                 Some(detail) => detail.clone().into_any_element(),
                 None => self.roasts.clone().into_any_element(),
             },
+            Page::Compare => match &self.compare {
+                Some(compare) => compare.clone().into_any_element(),
+                None => self.roasts.clone().into_any_element(),
+            },
             other => Self::coming(other),
         };
         let nav = if self.page == Page::Live {
@@ -525,22 +565,33 @@ mod tests {
 
     /// Answers what the pages ask, as the engine would, and says what they asked.
     fn serve(rx: &mut mpsc::Receiver<Request>, roast: &RoastDoc) -> Vec<String> {
+        serve_all(rx, std::slice::from_ref(roast))
+    }
+
+    /// As `serve`, listing every roast given and finding each by id.
+    fn serve_all(rx: &mut mpsc::Receiver<Request>, all: &[RoastDoc]) -> Vec<String> {
+        let roast = &all[0];
         let mut seen = Vec::new();
         while let Ok(req) = rx.try_recv() {
             match req {
                 Request::Edit(Edit::Roasts(q, reply)) => {
                     seen.push(format!("roasts q={:?} since={}", q.q, q.since.is_some()));
                     let _ = reply.send(Ok(RoastPage {
-                        roasts: vec![roast.clone()],
+                        roasts: all.to_vec(),
                         next_before: None,
                     }));
                 }
                 Request::Edit(Edit::Coffees(_, reply)) => {
                     let _ = reply.send(Ok(Vec::new()));
                 }
-                Request::Roast(_, reply) => {
-                    seen.push("roast".into());
-                    let _ = reply.send(Ok(roast.clone()));
+                Request::Roast(id, reply) => {
+                    let found = all.iter().find(|r| r.id == id.0).unwrap_or(roast);
+                    seen.push(if all.len() == 1 {
+                        "roast".into()
+                    } else {
+                        format!("roast #{}", found.number)
+                    });
+                    let _ = reply.send(Ok(found.clone()));
                 }
                 Request::Samples(_, reply) => {
                     let _ = reply.send(Ok(Columns {
@@ -665,5 +716,44 @@ mod tests {
             Some("roasts q=Some(\"7\") since=true"),
             "back to the list as it was, refreshed"
         );
+    }
+
+    #[gpui_kit::test]
+    fn ticks_roasts_and_compares_them(cx: &mut TestAppContext) {
+        let (handle, shell, mut rx) = open(cx);
+        let all = [done_roast(Uuid::now_v7(), 8), done_roast(Uuid::now_v7(), 7)];
+        serve_all(&mut rx, &all);
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("rail-roasts", cx);
+            window.render_frame(cx);
+            window.click("pick-8", cx);
+            window.click("pick-7", cx);
+            window.render_frame(cx);
+            window.click("compare-picked", cx);
+        })
+        .unwrap();
+        assert_eq!(
+            cx.update(|cx| shell.read(cx).page),
+            Page::Compare,
+            "ticking does not open a roast; Compare does"
+        );
+        let mut asked = Vec::new();
+        for _ in 0..4 {
+            cx.run_until_parked();
+            asked.extend(serve_all(&mut rx, &all));
+        }
+        assert_eq!(asked, ["roast #8", "roast #7"], "in the order ticked");
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(window.try_find("compare-figures").is_some());
+            window.click("align-fc", cx);
+            window.render_frame(cx);
+            window.click("compare-open-7", cx);
+        })
+        .unwrap();
+        assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Roast);
     }
 }

@@ -13,6 +13,7 @@
 
 mod assets;
 mod chart;
+mod compare;
 mod roast_detail;
 mod roasts;
 mod shell;

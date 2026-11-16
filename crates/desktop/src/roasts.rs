@@ -4,6 +4,7 @@
 //! which one.
 
 use gpui_kit::TestSupportExt as _;
+use gpui_kit::component::Disableable as _;
 use gpui_kit::component::button::Button;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::component::select::{Select, SelectEvent, SelectState};
@@ -18,6 +19,7 @@ use roastro::wire::{CoffeeOut, RoastDoc, RoastQueryIn};
 use uuid::Uuid;
 
 use crate::chart;
+use crate::compare::{self, CompareRoasts};
 use crate::state::Millis;
 use crate::view::next_roast::Choice;
 use crate::view::rail::label;
@@ -70,10 +72,13 @@ pub struct RoastsPage {
     /// Bumped on every new query, so a slow reply to an old one is dropped.
     generation: u64,
     coffees_stale: Option<Vec<CoffeeOut>>,
+    /// Roasts ticked to compare, in the order ticked.
+    picked: Vec<Uuid>,
     _subscriptions: Vec<Subscription>,
 }
 
 impl EventEmitter<OpenRoast> for RoastsPage {}
+impl EventEmitter<CompareRoasts> for RoastsPage {}
 
 impl RoastsPage {
     pub fn new(
@@ -113,6 +118,7 @@ impl RoastsPage {
             next_before: None,
             generation: 0,
             coffees_stale: None,
+            picked: Vec::new(),
             _subscriptions: subscriptions,
         };
         page.load_coffees(cx);
@@ -196,6 +202,16 @@ impl RoastsPage {
         ms * self.time_scale / 1000.0
     }
 
+    fn toggle_pick(&mut self, id: Uuid, cx: &mut Context<Self>) {
+        if let Some(i) = self.picked.iter().position(|p| *p == id) {
+            self.picked.remove(i);
+        } else if self.picked.len() < compare::MAX {
+            self.picked.push(id);
+        }
+        cx.notify();
+    }
+
+    #[allow(clippy::too_many_lines)] // one row, left to right
     fn row(&self, r: &RoastDoc, cx: &mut Context<Self>) -> impl IntoElement {
         let at = |kind: EventKind| {
             r.events
@@ -236,6 +252,23 @@ impl RoastsPage {
             .cursor_pointer()
             .hover(|d| d.bg(white(0.03)))
             .on_click(cx.listener(move |_, _, _, cx| cx.emit(OpenRoast(id))))
+            .child({
+                let picked = self.picked.contains(&id);
+                div()
+                    .id(SharedString::from(format!("pick-{}", r.number)))
+                    .test_support()
+                    .size(px(18.))
+                    .flex_none()
+                    .rounded_sm()
+                    .border_1()
+                    .cursor_pointer()
+                    .border_color(if picked { chart::bt() } else { white(0.3) })
+                    .when(picked, |d| d.bg(chart::bt()))
+                    .on_click(cx.listener(move |this, _, _, cx| {
+                        cx.stop_propagation();
+                        this.toggle_pick(id, cx);
+                    }))
+            })
             .child(
                 div()
                     .w(px(48.))
@@ -391,6 +424,17 @@ impl Render for RoastsPage {
                             .child("Roasts"),
                     )
                     .child(
+                        Button::new("compare-picked")
+                            .label(match self.picked.len() {
+                                0 | 1 => "Tick 2–5 roasts to compare".to_owned(),
+                                n => format!("Compare {n} roasts"),
+                            })
+                            .disabled(self.picked.len() < 2)
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                cx.emit(CompareRoasts(this.picked.clone()));
+                            })),
+                    )
+                    .child(
                         div()
                             .w(px(260.))
                             .child(Select::new(&self.coffee).placeholder("All coffees")),
@@ -430,6 +474,7 @@ impl Render for RoastsPage {
                     .gap_4()
                     .px_4()
                     .pt_3()
+                    .child(div().w(px(18.)))
                     .child(div().w(px(48.)))
                     .child(div().flex_1())
                     .child(

@@ -445,7 +445,7 @@ fn at(f: &Frame, kind: EventKind) -> Option<f64> {
     f.events.iter().find(|(k, _)| *k == kind).map(|&(_, s)| s)
 }
 
-fn line(
+pub(crate) fn line(
     window: &mut Window,
     pts: &[(Pixels, Pixels)],
     width: Pixels,
@@ -468,7 +468,7 @@ fn line(
     }
 }
 
-fn text(window: &mut Window, cx: &mut App, s: &str, origin: Point<Pixels>, color: Hsla) {
+pub(crate) fn text(window: &mut Window, cx: &mut App, s: &str, origin: Point<Pixels>, color: Hsla) {
     let run = TextRun {
         len: s.len(),
         font: window.text_style().font(),
