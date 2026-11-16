@@ -17,9 +17,9 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::api::ApiError;
 use crate::record::Recording;
 use crate::wire::{
-    CoffeeIn, CoffeeOut, CoffeePatch, Columns, EventIn, Link, LinkState, Live, NextRoastIn,
-    NextRoastOut, NoteIn, NoteOut, NotePatch, RoastDoc, RoastPage, RoastPatchIn, RoastQueryIn,
-    RorSettings, SampleOut, Snapshot, SummaryOut, samples_with_ror,
+    CoffeeIn, CoffeeOut, CoffeePatch, Columns, EventIn, Link, LinkDropOut, LinkState, Live,
+    NextRoastIn, NextRoastOut, NoteIn, NoteOut, NotePatch, RoastDoc, RoastPage, RoastPatchIn,
+    RoastQueryIn, RorSettings, SampleOut, Snapshot, SummaryOut, samples_with_ror,
 };
 use uuid::Uuid;
 
@@ -42,7 +42,7 @@ pub enum Request {
         /// Wall-clock time of the attempt.
         at: Millis,
         /// The reading, or why there is none.
-        result: Result<Reading, String>,
+        result: Result<Reading, Failure>,
         /// Wait before the next attempt.
         retry_in: Duration,
     },
@@ -92,6 +92,35 @@ pub enum Edit {
     PatchCoffee(Uuid, CoffeePatch, Reply<CoffeeOut>),
     /// A page of roasts.
     Roasts(RoastQueryIn, Reply<RoastPage>),
+    /// Dial the machine now instead of waiting for the next attempt.
+    RetryNow(Reply<()>),
+    /// The latest link drops, newest first.
+    LinkDrops(Reply<Vec<LinkDropOut>>),
+}
+
+/// Why a poll brought no reading.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Failure {
+    /// The error, as the PLC client reports it.
+    pub error: String,
+    /// What to check, in plain words.
+    pub advice: String,
+}
+
+impl From<&plc::Error> for Failure {
+    fn from(e: &plc::Error) -> Self {
+        Self {
+            error: e.to_string(),
+            advice: e.trouble().advice().to_owned(),
+        }
+    }
+}
+
+/// What the engine asks of the task that polls the machine.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LinkCommand {
+    /// Drop the connection and dial again now.
+    RetryNow,
 }
 
 /// The engine's state. Lives on its own thread; see [`Engine::run`].
@@ -107,6 +136,10 @@ pub struct Engine {
     /// Live rate of rise of the roast receiving samples.
     live_ror: Option<LiveRoR>,
     now: fn() -> Millis,
+    /// The drop going on, once the machine stopped answering.
+    open_drop: Option<i64>,
+    /// The task polling the machine, when there is one.
+    link_control: Option<mpsc::Sender<LinkCommand>>,
 }
 
 struct LiveRoR {
@@ -125,10 +158,11 @@ impl Engine {
     ) -> Self {
         let shown = recording.current();
         let link = Link {
-            state: LinkState::Down,
+            state: LinkState::Connecting,
             since: now(),
-            error: Some("not connected yet".into()),
+            error: None,
             retry_at: None,
+            advice: None,
         };
         let mut engine = Self {
             recording,
@@ -139,6 +173,8 @@ impl Engine {
             ror,
             live_ror: None,
             now,
+            open_drop: None,
+            link_control: None,
         };
         if let Some(id) = shown {
             engine.start_live_ror(id);
@@ -195,15 +231,68 @@ impl Engine {
         }
     }
 
-    fn poll(&mut self, at: Millis, result: Result<Reading, String>, retry_in: Duration) {
+    /// Lets the engine ask the polling task to dial again.
+    #[must_use]
+    pub fn with_link_control(mut self, control: mpsc::Sender<LinkCommand>) -> Self {
+        self.link_control = Some(control);
+        self
+    }
+
+    /// Dials the machine now; the link shows Connecting until it answers.
+    fn retry_now(&mut self) -> Result<(), ApiError> {
+        let sent = self
+            .link_control
+            .as_ref()
+            .is_some_and(|c| c.try_send(LinkCommand::RetryNow).is_ok());
+        if !sent {
+            return Err(ApiError::conflict(
+                "no_link",
+                "there is no machine connection to retry",
+            ));
+        }
+        let mut link = self.link.clone();
+        link.state = LinkState::Connecting;
+        link.retry_at = None;
+        self.set_link(link);
+        Ok(())
+    }
+
+    fn link_drops(&self) -> Result<Vec<LinkDropOut>, ApiError> {
+        let store = self.recording.store();
+        store
+            .link_drops(50)
+            .map_err(ApiError::internal)?
+            .into_iter()
+            .map(|d| {
+                let roast_number = match d.roast {
+                    Some(id) => Some(store.roast(id).map_err(ApiError::internal)?.number),
+                    None => None,
+                };
+                Ok(LinkDropOut {
+                    started_at: d.started_at,
+                    ended_at: d.ended_at,
+                    error: d.error,
+                    roast_number,
+                })
+            })
+            .collect()
+    }
+
+    fn poll(&mut self, at: Millis, result: Result<Reading, Failure>, retry_in: Duration) {
         match result {
             Ok(reading) => {
                 if self.link.state != LinkState::Connected {
+                    if let Some(drop) = self.open_drop.take()
+                        && let Err(err) = self.recording.store_mut().end_link_drop(drop, at)
+                    {
+                        tracing::error!(%err, "could not log the end of a link drop");
+                    }
                     self.set_link(Link {
                         state: LinkState::Connected,
                         since: at,
                         error: None,
                         retry_at: None,
+                        advice: None,
                     });
                 }
                 let sample = Sample {
@@ -221,19 +310,31 @@ impl Engine {
                 self.remember(out.clone());
                 self.publish(Live::Sample(out));
             }
-            Err(error) => {
+            Err(failure) => {
                 let since = if self.link.state == LinkState::Down {
                     self.link.since
                 } else {
                     at
                 };
+                if self.link.state == LinkState::Connected {
+                    let roast = self.recording.current();
+                    match self
+                        .recording
+                        .store_mut()
+                        .begin_link_drop(at, &failure.error, roast)
+                    {
+                        Ok(drop) => self.open_drop = Some(drop),
+                        Err(err) => tracing::error!(%err, "could not log a link drop"),
+                    }
+                }
                 #[allow(clippy::cast_possible_truncation)] // backoff is seconds
                 let retry_at = Some(at + retry_in.as_millis() as Millis);
                 self.set_link(Link {
                     state: LinkState::Down,
                     since,
-                    error: Some(error),
+                    error: Some(failure.error),
                     retry_at,
+                    advice: Some(failure.advice),
                 });
                 if let Err(err) = self.apply(Input::Missed(at)) {
                     tracing::error!(%err, "could not record a missed poll");
@@ -414,7 +515,9 @@ mod tests {
     use store::Store;
 
     use super::*;
-    use crate::wire::{CoffeeIn, EventIn, NextRoastIn, NoteIn, RoastPatchIn, RoastQueryIn};
+    use crate::wire::{
+        CoffeeIn, EventIn, LinkDropOut, NextRoastIn, NoteIn, RoastPatchIn, RoastQueryIn,
+    };
 
     thread_local! {
         /// A clock the tests move by hand, one per test thread so tests
@@ -580,7 +683,10 @@ mod tests {
         poll(&mut e, 0, 120.0);
         e.handle(Request::Poll {
             at: 1000,
-            result: Err("connection refused".into()),
+            result: Err(Failure {
+                error: "connection refused".into(),
+                advice: "Check the cable.".into(),
+            }),
             retry_in: Duration::from_secs(2),
         });
         let msgs: Vec<serde_json::Value> = std::iter::from_fn(|| rx.try_recv().ok())
@@ -590,6 +696,62 @@ mod tests {
         assert_eq!(down["data"]["state"], "down");
         assert_eq!(down["data"]["retry_at"], 3000);
         assert_eq!(down["data"]["error"], "connection refused");
+        assert_eq!(down["data"]["advice"], "Check the cable.");
+    }
+
+    fn fail(e: &mut Engine, second: i64, error: &str) {
+        e.handle(Request::Poll {
+            at: second * 1000,
+            result: Err(Failure {
+                error: error.into(),
+                advice: String::new(),
+            }),
+            retry_in: Duration::from_secs(1),
+        });
+    }
+
+    #[test]
+    fn logs_a_drop_only_after_the_machine_answered() {
+        let (e, _rx) = engine();
+        let (control, mut commands) = mpsc::channel(4);
+        let mut e = e.with_link_control(control);
+        fail(&mut e, 0, "refused at startup");
+        assert_eq!(
+            edit(&mut e, Edit::LinkDrops).unwrap(),
+            [],
+            "a machine that never answered did not drop"
+        );
+        for s in 1..5 {
+            poll(&mut e, s, 120.0);
+        }
+        let roast = ask(&mut e, Request::Charge).unwrap();
+        poll(&mut e, 5, 121.0);
+        fail(&mut e, 6, "timed out");
+        fail(&mut e, 7, "timed out again");
+        poll(&mut e, 9, 125.0);
+        assert_eq!(
+            edit(&mut e, Edit::LinkDrops).unwrap(),
+            [LinkDropOut {
+                started_at: 6000,
+                ended_at: Some(9000),
+                error: "timed out".into(),
+                roast_number: Some(roast.number),
+            }],
+            "one drop, its first error, the roast it hit"
+        );
+
+        fail(&mut e, 10, "refused");
+        assert_eq!(edit(&mut e, Edit::RetryNow), Ok(()));
+        assert_eq!(commands.try_recv(), Ok(LinkCommand::RetryNow));
+        let (snapshot, _sub) = ask(&mut e, Request::Subscribe).unwrap();
+        let snap = serde_json::to_value(&*snapshot).unwrap();
+        assert_eq!(snap["data"]["link"]["state"], "connecting");
+    }
+
+    #[test]
+    fn retry_now_needs_a_machine_connection() {
+        let (mut e, _rx) = engine();
+        assert_eq!(edit(&mut e, Edit::RetryNow), Err("no_link"));
     }
 
     #[test]

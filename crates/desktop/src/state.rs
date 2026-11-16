@@ -322,6 +322,7 @@ mod tests {
                 since: 0,
                 error: None,
                 retry_at: None,
+                advice: None,
             },
             next_roast: NextRoastOut {
                 coffee_id: None,

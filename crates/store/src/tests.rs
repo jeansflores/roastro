@@ -409,3 +409,32 @@ fn keeps_coffee_details_and_figures_over_finished_roasts() {
     assert!((s.average_development_time_ratio.unwrap() - 0.2).abs() < 1e-9);
     assert!((s.average_weight_loss_ratio.unwrap() - 0.16).abs() < 1e-9);
 }
+
+#[test]
+fn logs_link_drops_newest_first() {
+    let mut st = Store::open_in_memory().unwrap();
+    let roast = st.start_roast(0, Source::Manual, &[]).unwrap();
+    let first = st.begin_link_drop(1_000, "timed out", Some(roast)).unwrap();
+    st.end_link_drop(first, 4_000).unwrap();
+    st.end_link_drop(first, 9_000).unwrap();
+    st.begin_link_drop(20_000, "refused", None).unwrap();
+    let drops = st.link_drops(10).unwrap();
+    assert_eq!(
+        drops,
+        [
+            LinkDrop {
+                started_at: 20_000,
+                ended_at: None,
+                error: "refused".into(),
+                roast: None,
+            },
+            LinkDrop {
+                started_at: 1_000,
+                ended_at: Some(4_000),
+                error: "timed out".into(),
+                roast: Some(roast),
+            },
+        ],
+        "an ended drop keeps its first end"
+    );
+}
