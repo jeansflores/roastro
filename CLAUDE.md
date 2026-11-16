@@ -1,6 +1,6 @@
 # Roastro
 
-Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. Rust backend (see `docs/adr/0002-rewrite-in-rust.md`); a TS/React frontend will live in `web/`. Background, machine facts and decisions: `docs/context.md`. Milestones and feature plan: `docs/roadmap.md`. Primary sources (manual, electrical schematic): `docs/reference/`.
+Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. All Rust (`docs/adr/0002-rewrite-in-rust.md`), including the desktop UI, built with GPUI and gpui-component (`docs/adr/0003-native-ui-with-gpui.md`). Background, machine facts and decisions: `docs/context.md`. Milestones and feature plan: `docs/roadmap.md`. Primary sources (manual, electrical schematic): `docs/reference/`.
 
 ## Rules
 
@@ -23,7 +23,7 @@ crates/store     SQLite: schema, embedded migrations on PRAGMA user_version, the
 crates/regmap    register map loading, validation, encode/decode
 crates/machine   machine facts from the manual (fan % → m³/h, drum % → rpm)
 crates/plc       async Modbus client by point name (timeouts, reconnect, loopback-only writes) and poller with backoff
-crates/roastro   the app: an engine thread owns recorder + store; axum API and live WebSocket on 127.0.0.1:8000 (Origin-checked, no PLC writes); web UI to come
+crates/roastro   the app: an engine thread owns recorder + store; axum API and live WebSocket on 127.0.0.1:8000 (Origin-checked, no PLC writes); the native UI is next
 crates/sim       PLC simulator: thermal model, interlocks, autopilot; binary serves Modbus TCP :5502 + HTTP panel :8080 on loopback
 crates/probe     line-based Modbus client (read, CSV, one-off writes)
 crates/monitor   terminal dashboard (ratatui) with live readings and keyboard commands
