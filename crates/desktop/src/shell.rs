@@ -850,6 +850,18 @@ mod tests {
         assert!(written.starts_with("\u{feff}Roast time (s);"), "{written}");
         let _ = std::fs::remove_file(&csv);
 
+        let pdf = csv.with_extension("pdf");
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("export-pdf", cx);
+        })
+        .unwrap();
+        cx.simulate_new_path_selection(|_| Some(pdf.clone()));
+        cx.run_until_parked();
+        let written = std::fs::read(&pdf).expect("the PDF is saved where chosen");
+        assert!(written.starts_with(b"%PDF-"));
+        let _ = std::fs::remove_file(&pdf);
+
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
             window.click("use-as-reference", cx);

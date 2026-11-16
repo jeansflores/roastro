@@ -11,6 +11,7 @@ pub mod engine;
 pub mod export;
 pub mod machine;
 mod record;
+pub mod report;
 // The wire types mirror the JSON contract field for field; it is documented
 // in "Contract between the backend and the web UI" (#8), not per field here.
 #[allow(missing_docs)]

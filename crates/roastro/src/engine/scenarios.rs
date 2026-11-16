@@ -36,6 +36,12 @@ struct Truth {
 /// Runs the autopilot (and the scenario) for `seconds` and returns the roasts
 /// recorded, oldest first, and what really happened.
 fn run(scenario: Option<Scenario>, seconds: u32) -> (Vec<RoastDoc>, Truth) {
+    let (roasts, truth, _engine) = run_engine(scenario, seconds);
+    (roasts, truth)
+}
+
+/// As [`run`], keeping the engine to ask it more.
+fn run_engine(scenario: Option<Scenario>, seconds: u32) -> (Vec<RoastDoc>, Truth, Engine) {
     let (live, _rx) = broadcast::channel(16);
     let rules = Rules::default();
     let recording = Recording::open(Store::open_in_memory().unwrap(), rules).unwrap();
@@ -94,7 +100,7 @@ fn run(scenario: Option<Scenario>, seconds: u32) -> (Vec<RoastDoc>, Truth) {
             _ => {}
         }
     }
-    (roasts, truth)
+    (roasts, truth, engine)
 }
 
 /// Roast seconds of an event, if the roast has it.
@@ -201,4 +207,21 @@ fn alarms_are_noted_once_on_the_roast() {
     assert_eq!(notes[0].0, "Flame failure");
     assert!((notes[0].1 - 300.0).abs() <= 2.0, "{notes:?}");
     assert_eq!(notes[1].0, "Emergency stop");
+}
+
+/// `REPORT_OUT=/tmp/roast.pdf cargo test -p roastro write_a_report -- --ignored`
+/// writes the PDF report of a simulated roast, to look at.
+#[test]
+#[ignore = "writes a file to look at"]
+fn write_a_report_to_look_at() {
+    let (roasts, _, mut engine) = run_engine(None, 1300);
+    let roast = &roasts[0];
+    let (tx, mut rx) = oneshot::channel();
+    engine.handle(Request::Samples(store::RoastId(roast.id), tx));
+    let columns = rx.try_recv().unwrap().unwrap();
+    let (tx, mut rx) = oneshot::channel();
+    engine.handle(Request::Roast(store::RoastId(roast.id), tx));
+    let roast = rx.try_recv().unwrap().unwrap();
+    let pdf = crate::report::roast_pdf(&roast, &columns, None, 1.0);
+    std::fs::write(std::env::var("REPORT_OUT").unwrap(), pdf).unwrap();
 }
