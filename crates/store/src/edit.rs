@@ -45,6 +45,24 @@ pub struct Coffee {
     pub archived: bool,
 }
 
+/// The machine Roastro reads.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Machine {
+    /// Id: every roast belongs to one.
+    pub id: Uuid,
+    /// As the roastery calls it.
+    pub name: String,
+    /// `tcp://host:port`; empty until set up.
+    pub address: String,
+    /// The register map's model id; empty until set up.
+    pub model: String,
+    /// The built-in simulator: its roasts stay out of the real history.
+    pub demo: bool,
+}
+
+/// The Demo machine's name.
+pub const DEMO_MACHINE: &str = "Demo (simulator)";
+
 /// A stretch when the machine stopped answering after having answered.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LinkDrop {
@@ -582,5 +600,96 @@ impl Store {
             });
         }
         Ok(out)
+    }
+
+    /// The machine in use.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn machine(&self) -> Result<Machine> {
+        self.machine_by_id(self.machine_id)
+    }
+
+    fn machine_by_id(&self, id: Uuid) -> Result<Machine> {
+        Ok(self.conn.query_row(
+            "SELECT name, address, model, demo FROM machine WHERE id = ?1",
+            [id.to_string()],
+            |r| {
+                Ok(Machine {
+                    id,
+                    name: r.get(0)?,
+                    address: r.get(1)?,
+                    model: r.get(2)?,
+                    demo: r.get(3)?,
+                })
+            },
+        )?)
+    }
+
+    fn use_machine(&mut self, id: Uuid) -> Result<Machine> {
+        self.conn.execute(
+            "INSERT INTO app_setting (key, value) VALUES ('current_machine', ?1)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            [id.to_string()],
+        )?;
+        self.machine_id = id;
+        self.machine()
+    }
+
+    /// Sets up the real machine and uses it.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn save_machine(&mut self, name: &str, address: &str, model: &str) -> Result<Machine> {
+        let real: Option<String> = self
+            .conn
+            .query_row(
+                "SELECT id FROM machine WHERE demo = 0 ORDER BY rowid LIMIT 1",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?;
+        let id = if let Some(id) = real {
+            parse_uuid(&id)?
+        } else {
+            let id = Uuid::now_v7();
+            self.conn.execute(
+                "INSERT INTO machine (id, name) VALUES (?1, ?2)",
+                params![id.to_string(), name],
+            )?;
+            id
+        };
+        self.conn.execute(
+            "UPDATE machine SET name = ?1, address = ?2, model = ?3 WHERE id = ?4",
+            params![name, address, model, id.to_string()],
+        )?;
+        self.use_machine(id)
+    }
+
+    /// Uses the Demo machine, made on first use.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn use_demo(&mut self, model: &str) -> Result<Machine> {
+        let demo: Option<String> = self
+            .conn
+            .query_row("SELECT id FROM machine WHERE demo = 1 LIMIT 1", [], |r| {
+                r.get(0)
+            })
+            .optional()?;
+        let id = if let Some(id) = demo {
+            parse_uuid(&id)?
+        } else {
+            let id = Uuid::now_v7();
+            self.conn.execute(
+                "INSERT INTO machine (id, name, model, demo) VALUES (?1, ?2, ?3, 1)",
+                params![id.to_string(), DEMO_MACHINE, model],
+            )?;
+            id
+        };
+        self.use_machine(id)
     }
 }

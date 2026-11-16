@@ -22,13 +22,16 @@ use uuid::Uuid;
 
 mod edit;
 
-pub use edit::{Coffee, CoffeeChange, CoffeeStats, LinkDrop, RoastPatch, RoastQuery};
+pub use edit::{
+    Coffee, CoffeeChange, CoffeeStats, DEMO_MACHINE, LinkDrop, Machine, RoastPatch, RoastQuery,
+};
 
 /// The migrations, in order. Never edit one that has shipped; add a new one.
 const MIGRATIONS: &[&str] = &[
     include_str!("../migrations/0001_initial.sql"),
     include_str!("../migrations/0002_coffee_details.sql"),
     include_str!("../migrations/0003_link_drop.sql"),
+    include_str!("../migrations/0004_machine_settings.sql"),
 ];
 
 /// Name of the machine row created with a new database.
@@ -195,11 +198,18 @@ impl Store {
         conn.pragma_update(None, "foreign_keys", "ON")?;
         conn.busy_timeout(std::time::Duration::from_secs(5))?;
         migrate(&mut conn)?;
+        // The machine in use, else the first real one.
         let existing: Option<String> = conn
-            .query_row("SELECT id FROM machine ORDER BY rowid LIMIT 1", [], |r| {
-                r.get(0)
-            })
-            .optional()?;
+            .query_row(
+                "SELECT COALESCE(
+                    (SELECT m.id FROM machine m JOIN app_setting s
+                       ON s.key = 'current_machine' AND s.value = m.id),
+                    (SELECT id FROM machine WHERE demo = 0 ORDER BY rowid LIMIT 1))",
+                [],
+                |r| r.get(0),
+            )
+            .optional()?
+            .flatten();
         let machine_id = if let Some(id) = existing {
             parse_uuid(&id)?
         } else {

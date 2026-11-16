@@ -10,6 +10,7 @@ use std::time::Duration;
 
 use plc::Reading;
 use recorder::{Input, Millis, Sample};
+use regmap::Map;
 use roast::RoR;
 use store::RoastId;
 use tokio::sync::{broadcast, mpsc, oneshot};
@@ -18,8 +19,9 @@ use crate::api::ApiError;
 use crate::record::Recording;
 use crate::wire::{
     CoffeeIn, CoffeeOut, CoffeePatch, Columns, EventIn, Link, LinkDropOut, LinkState, Live,
-    NextRoastIn, NextRoastOut, NoteIn, NoteOut, NotePatch, RoastDoc, RoastPage, RoastPatchIn,
-    RoastQueryIn, RorSettings, SampleOut, Snapshot, SummaryOut, samples_with_ror,
+    MachineIn, MachineOut, NextRoastIn, NextRoastOut, NoteIn, NoteOut, NotePatch, RoastDoc,
+    RoastPage, RoastPatchIn, RoastQueryIn, RorSettings, SampleOut, Snapshot, SummaryOut, TestOut,
+    samples_with_ror,
 };
 use uuid::Uuid;
 
@@ -96,6 +98,13 @@ pub enum Edit {
     RetryNow(Reply<()>),
     /// The latest link drops, newest first.
     LinkDrops(Reply<Vec<LinkDropOut>>),
+    /// The machine in use.
+    Machine(Reply<MachineOut>),
+    /// Set up the machine (or use the Demo one) and connect to it. Refused
+    /// while a roast is recording.
+    SetMachine(MachineIn, Reply<MachineOut>),
+    /// One read of settings not saved yet, to see that they work.
+    TestMachine(MachineIn, Reply<TestOut>),
 }
 
 /// Why a poll brought no reading.
@@ -116,11 +125,28 @@ impl From<&plc::Error> for Failure {
     }
 }
 
+/// Which machine to read.
+#[derive(Debug, Clone)]
+pub enum Target {
+    /// A PLC at an address, read with a register map.
+    Machine {
+        /// `tcp://host:port`.
+        url: String,
+        /// Its register map.
+        map: Arc<Map>,
+    },
+    /// The built-in simulator.
+    Demo,
+}
+
 /// What the engine asks of the task that polls the machine.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LinkCommand {
     /// Drop the connection and dial again now.
     RetryNow,
+    /// Read this machine from now on.
+    Connect(Target),
+    /// Read this machine once and answer, without changing the connection.
+    Test(Target, Reply<TestOut>),
 }
 
 /// The engine's state. Lives on its own thread; see [`Engine::run`].
@@ -140,6 +166,8 @@ pub struct Engine {
     open_drop: Option<i64>,
     /// The task polling the machine, when there is one.
     link_control: Option<mpsc::Sender<LinkCommand>>,
+    /// The machine in use.
+    machine: MachineOut,
 }
 
 struct LiveRoR {
@@ -157,6 +185,19 @@ impl Engine {
         now: fn() -> Millis,
     ) -> Self {
         let shown = recording.current();
+        let machine = recording.store().machine().map_or_else(
+            |err| {
+                tracing::error!(%err, "could not read the machine");
+                MachineOut {
+                    name: String::new(),
+                    address: String::new(),
+                    model: String::new(),
+                    model_title: String::new(),
+                    demo: false,
+                }
+            },
+            MachineOut::from,
+        );
         let link = Link {
             state: LinkState::Connecting,
             since: now(),
@@ -175,6 +216,7 @@ impl Engine {
             now,
             open_drop: None,
             link_control: None,
+            machine,
         };
         if let Some(id) = shown {
             engine.start_live_ror(id);
@@ -236,6 +278,102 @@ impl Engine {
     pub fn with_link_control(mut self, control: mpsc::Sender<LinkCommand>) -> Self {
         self.link_control = Some(control);
         self
+    }
+
+    /// Nothing to read until a machine is set up.
+    #[must_use]
+    pub fn waiting_for_setup(mut self) -> Self {
+        self.link.state = LinkState::NotSetUp;
+        self
+    }
+
+    /// Where `body` points, checked.
+    fn target(body: &MachineIn) -> Result<Target, ApiError> {
+        if body.demo {
+            return Ok(Target::Demo);
+        }
+        let url = crate::machine::normalize_address(&body.address).ok_or_else(|| {
+            ApiError::invalid("invalid_address", plc::Trouble::BadAddress.advice())
+        })?;
+        let map = crate::machine::model_map(&body.model)
+            .map_err(|e| ApiError::invalid("unknown_model", e.to_string()))?;
+        Ok(Target::Machine {
+            url,
+            map: Arc::new(map),
+        })
+    }
+
+    fn set_machine(&mut self, body: &MachineIn) -> Result<MachineOut, ApiError> {
+        if self.recording.current().is_some() {
+            return Err(ApiError::conflict(
+                "roast_recording",
+                "Finish the roast before changing the machine.",
+            ));
+        }
+        let target = Self::target(body)?;
+        let store = self.recording.store_mut();
+        let saved = match &target {
+            Target::Demo => store.use_demo(crate::machine::SIMULATOR),
+            Target::Machine { url, .. } => {
+                let name = body.name.trim();
+                let name = if name.is_empty() {
+                    crate::machine::model_title(&body.model)
+                } else {
+                    name
+                };
+                store.save_machine(name, url, &body.model)
+            }
+        }
+        .map_err(ApiError::internal)?;
+        self.machine = MachineOut::from(saved);
+        if let Some(control) = &self.link_control
+            && control.try_send(LinkCommand::Connect(target)).is_err()
+        {
+            tracing::error!("the polling task is not listening");
+        }
+        // What was on screen belongs to the machine before.
+        self.shown = None;
+        self.live_ror = None;
+        self.recent.clear();
+        self.open_drop = None;
+        self.link = Link {
+            state: LinkState::Connecting,
+            since: (self.now)(),
+            error: None,
+            retry_at: None,
+            advice: None,
+        };
+        self.publish(Live::Machine(self.machine.clone()));
+        let snapshot = self.snapshot()?;
+        self.publish(Live::Snapshot(snapshot));
+        Ok(self.machine.clone())
+    }
+
+    fn test_machine(&self, body: &MachineIn, reply: Reply<TestOut>) {
+        let target = match Self::target(body) {
+            Ok(target) => target,
+            Err(err) => {
+                let _ = reply.send(Err(err));
+                return;
+            }
+        };
+        let Some(control) = &self.link_control else {
+            let _ = reply.send(Err(ApiError::conflict(
+                "no_link",
+                "there is no machine connection to test with",
+            )));
+            return;
+        };
+        if let Err(
+            mpsc::error::TrySendError::Full(LinkCommand::Test(_, reply))
+            | mpsc::error::TrySendError::Closed(LinkCommand::Test(_, reply)),
+        ) = control.try_send(LinkCommand::Test(target, reply))
+        {
+            let _ = reply.send(Err(ApiError::conflict(
+                "busy",
+                "Roastro is busy; try again",
+            )));
+        }
     }
 
     /// Dials the machine now; the link shows Connecting until it answers.
@@ -428,6 +566,7 @@ impl Engine {
             None => self.recent.iter().cloned().collect(),
         };
         Ok(Snapshot {
+            machine: self.machine.clone(),
             link: self.link.clone(),
             next_roast: NextRoastOut::load(store).map_err(ApiError::internal)?,
             roast,
@@ -516,7 +655,7 @@ mod tests {
 
     use super::*;
     use crate::wire::{
-        CoffeeIn, EventIn, LinkDropOut, NextRoastIn, NoteIn, RoastPatchIn, RoastQueryIn,
+        CoffeeIn, EventIn, LinkDropOut, MachineIn, NextRoastIn, NoteIn, RoastPatchIn, RoastQueryIn,
     };
 
     thread_local! {
@@ -742,10 +881,73 @@ mod tests {
 
         fail(&mut e, 10, "refused");
         assert_eq!(edit(&mut e, Edit::RetryNow), Ok(()));
-        assert_eq!(commands.try_recv(), Ok(LinkCommand::RetryNow));
+        assert!(matches!(commands.try_recv(), Ok(LinkCommand::RetryNow)));
         let (snapshot, _sub) = ask(&mut e, Request::Subscribe).unwrap();
         let snap = serde_json::to_value(&*snapshot).unwrap();
         assert_eq!(snap["data"]["link"]["state"], "connecting");
+    }
+
+    #[test]
+    fn sets_up_the_machine_only_between_roasts() {
+        let (e, mut rx) = engine();
+        let (control, mut commands) = mpsc::channel(4);
+        let mut e = e.with_link_control(control).waiting_for_setup();
+        let (snapshot, _sub) = ask(&mut e, Request::Subscribe).unwrap();
+        let snap = serde_json::to_value(&*snapshot).unwrap();
+        assert_eq!(snap["data"]["link"]["state"], "not_set_up");
+        assert_eq!(snap["data"]["machine"]["address"], "");
+
+        let set = |e: &mut Engine, address: &str, model: &str| {
+            let body = MachineIn {
+                name: "Caloratto".into(),
+                address: address.into(),
+                model: model.into(),
+                demo: false,
+            };
+            edit(e, |r| Edit::SetMachine(body, r))
+        };
+        assert_eq!(
+            set(&mut e, "192.168 5.11", "caloratto-2.0").map(|_| ()),
+            Err("invalid_address")
+        );
+        assert_eq!(
+            set(&mut e, "192.168.5.11", "espresso").map(|_| ()),
+            Err("unknown_model")
+        );
+        let machine = set(&mut e, "192.168.5.11", "caloratto-2.0").unwrap();
+        assert_eq!(
+            (machine.address.as_str(), machine.model_title.as_str()),
+            ("tcp://192.168.5.11:502", "Carmomaq Caloratto 2.0")
+        );
+        assert!(matches!(
+            commands.try_recv(),
+            Ok(LinkCommand::Connect(Target::Machine { ref url, .. })) if url == "tcp://192.168.5.11:502"
+        ));
+        assert!(
+            types(&mut rx).ends_with(&["machine".to_owned(), "snapshot".to_owned()]),
+            "the screens learn of the new machine"
+        );
+
+        let probe = MachineIn {
+            demo: true,
+            ..MachineIn::default()
+        };
+        let (reply, _answer) = oneshot::channel();
+        e.handle(Request::Edit(Edit::TestMachine(probe, reply)));
+        assert!(
+            matches!(commands.try_recv(), Ok(LinkCommand::Test(Target::Demo, _))),
+            "a test goes to the polling task, the machine in use stays"
+        );
+        assert_eq!(edit(&mut e, Edit::Machine).unwrap(), machine);
+
+        for s in 0..3 {
+            poll(&mut e, s, 120.0);
+        }
+        ask(&mut e, Request::Charge).unwrap();
+        assert_eq!(
+            set(&mut e, "192.168.5.12", "caloratto-2.0").map(|_| ()),
+            Err("roast_recording")
+        );
     }
 
     #[test]

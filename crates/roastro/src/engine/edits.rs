@@ -73,6 +73,13 @@ impl Engine {
             Edit::LinkDrops(reply) => {
                 let _ = reply.send(self.link_drops());
             }
+            Edit::Machine(reply) => {
+                let _ = reply.send(Ok(self.machine.clone()));
+            }
+            Edit::SetMachine(body, reply) => {
+                let _ = reply.send(self.set_machine(&body));
+            }
+            Edit::TestMachine(body, reply) => self.test_machine(&body, reply),
         }
     }
 

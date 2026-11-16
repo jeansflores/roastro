@@ -23,5 +23,9 @@ tracing.workspace = true
 tracing-subscriber.workspace = true
 uuid.workspace = true
 
+[dev-dependencies]
+sim = { path = "../sim" }
+tokio-modbus = { workspace = true, features = ["tcp-server"] }
+
 [lints]
 workspace = true
