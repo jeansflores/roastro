@@ -6,8 +6,8 @@ Written in Rust ([ADR 0002](docs/adr/0002-rewrite-in-rust.md)).
 
 | Command | What it is |
 |---|---|
-| `crates/roastro` | The app: reads the PLC once a second, records every roast in SQLite (Charge, turning point and Drop detected automatically) and serves the API and the live stream (`ws://127.0.0.1:8000/api/live`) on this machine only. The native desktop UI (GPUI) comes next. |
-| `crates/desktop` | The desktop app: the live roast screen (chart, big numbers, phases, next event, timeline, notes) with the engine in the same process. `make desktop` runs it with a built-in simulator. |
+| `crates/roastro` | The app: reads the PLC once a second, records every roast in SQLite (Charge, turning point and Drop detected automatically) and serves the API and the live stream (`ws://127.0.0.1:8000/api/live`) on this machine only. Never writes to the PLC. |
+| `crates/desktop` | The desktop app, with the engine in the same process: the live roast screen (chart, big numbers, phases, timeline, notes), Roasts (filters by coffee, date and notes) and one Roast, Compare (2–5 curves aligned on Charge or First crack), Coffees, New roast, and Machine (set up in the app, Test connection, Retry now, link drops; read only). `make desktop` runs it with a built-in simulator. |
 | `crates/sim` | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
 | `crates/monitor` | Live terminal dashboard: roast values, link health, keyboard commands, automatic reconnection |
 | `crates/probe` | One line per reading, optional CSV, one-off writes |
