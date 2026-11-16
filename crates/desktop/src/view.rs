@@ -3,6 +3,7 @@
 //! timeline of events and notes.
 
 use gpui_kit::component::button::Button;
+use i18n::{t, tf};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -178,7 +179,7 @@ impl RoastScreen {
     fn send<T: 'static>(&mut self, make: impl FnOnce(Reply<T>) -> Request, cx: &mut Context<Self>) {
         self.message = None;
         let Some(reply) = self.engine.ask(make) else {
-            self.message = Some("Roastro is busy; try again".into());
+            self.message = Some(t("Roastro is busy; try again").into());
             cx.notify();
             return;
         };
@@ -324,7 +325,7 @@ impl RoastScreen {
         let s = st.roast_s(menu.at);
         let bt_then = st.sample_near(s).and_then(|x| x.values.get("bt").copied());
         let title = if menu.ahead {
-            format!("now · {}", clock_signed(s))
+            tf("now · {time}", &[("time", &clock_signed(s))])
         } else {
             clock_signed(s)
         };
@@ -336,13 +337,13 @@ impl RoastScreen {
         .into_iter()
         .map(|kind| {
             let hint = match kind {
-                EventKind::DryEnd => "  color change",
-                EventKind::FirstCrack => "  first pops",
+                EventKind::DryEnd => t("  color change"),
+                EventKind::FirstCrack => t("  first pops"),
                 _ => "",
             };
             let was = st
                 .event_at(kind)
-                .map(|at| format!("   was {}", clock_signed(st.roast_s(at))))
+                .map(|at| tf("   was {time}", &[("time", &clock_signed(st.roast_s(at)))]))
                 .unwrap_or_default();
             Button::new(SharedString::from(format!("menu-{}", kind.as_str())))
                 .label(format!("{}{hint}{was}", chart::label(kind)))
@@ -385,7 +386,7 @@ impl RoastScreen {
                     .flex()
                     .gap_2()
                     .child(Input::new(&self.menu_note).id("menu-note").flex_1())
-                    .child(Button::new("menu-add-note").label("Add note").on_click(
+                    .child(Button::new("menu-add-note").label(t("Add note")).on_click(
                         cx.listener(|this, _, window, cx| this.menu_add_note(window, cx)),
                     )),
             );
@@ -428,7 +429,7 @@ impl RoastScreen {
         let id = roastro::RoastId(roast.id);
         let text = self.weight.read(cx).value().to_string();
         let Some(grams) = grams(&text) else {
-            self.message = Some("roasted weight: kilograms, like 4.250".into());
+            self.message = Some(t("roasted weight: kilograms, like 4.250").into());
             cx.notify();
             return;
         };
@@ -457,7 +458,7 @@ impl RoastScreen {
     fn add_note(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let text = self.note.read(cx).value().to_string();
         let (Some(roast), Some(at)) = (self.state.roast.as_ref(), self.state.now()) else {
-            self.message = Some("notes belong to a roast: Charge first".into());
+            self.message = Some(t("notes belong to a roast: Charge first").into());
             cx.notify();
             return;
         };
@@ -544,7 +545,7 @@ pub(crate) fn hover_card(st: &LiveState, s: f64) -> Option<impl IntoElement> {
         if s.abs() < 0.5 {
             "now".to_owned()
         } else {
-            format!("{} ago", clock(-s))
+            tf("{time} ago", &[("time", &clock(-s))])
         }
     } else {
         clock_signed(s)
@@ -597,7 +598,7 @@ pub(crate) fn hover_card(st: &LiveState, s: f64) -> Option<impl IntoElement> {
         .map(|n| format!("“{}”", n.text))
         .collect();
     let hint =
-        (live.is_some() && st.roast.is_some()).then_some("Click to mark an event or add a note");
+        (live.is_some() && st.roast.is_some()).then_some(t("Click to mark an event or add a note"));
     Some(
         div()
             .w(px(240.))
@@ -619,7 +620,7 @@ pub(crate) fn hover_card(st: &LiveState, s: f64) -> Option<impl IntoElement> {
                         div()
                             .text_xs()
                             .text_color(white(0.45))
-                            .child("reference only")
+                            .child(t("reference only"))
                     })),
             )
             .child(
@@ -643,12 +644,12 @@ pub(crate) fn hover_card(st: &LiveState, s: f64) -> Option<impl IntoElement> {
                     .child(
                         div()
                             .text_color(chart::gas())
-                            .child(format!("gas {}%", fmt0(value("gas_fb")))),
+                            .child(tf("gas {v}%", &[("v", &fmt0(value("gas_fb")))])),
                     )
                     .child(
                         div()
                             .text_color(chart::air())
-                            .child(format!("air {}%", fmt0(value("fan")))),
+                            .child(tf("air {v}%", &[("v", &fmt0(value("fan")))])),
                     )
             }))
             .children(
@@ -688,16 +689,16 @@ impl RoastScreen {
                 .link
                 .as_ref()
                 .and_then(|l| l.error.clone())
-                .map_or("Connecting to the PLC…".into(), |e| {
-                    format!("PLC disconnected: {e}").into()
+                .map_or(t("Connecting to the PLC…").into(), |e| {
+                    tf("PLC disconnected: {e}", &[("e", &e)]).into()
                 });
             (text, rgb(0x00f8_7171).into())
         } else if st.recording() {
-            ("Recording".into(), rail::accent())
+            (t("Recording").into(), rail::accent())
         } else if st.roast.is_some() {
-            ("Done".into(), chart::ror())
+            (t("Done").into(), chart::ror())
         } else {
-            ("Waiting for charge".into(), white(0.7))
+            (t("Waiting for charge").into(), white(0.7))
         };
         let roast = st.roast.as_ref();
         let coffee = roast.and_then(|r| r.coffee.as_ref().map(|c| c.name.clone()));
@@ -705,11 +706,13 @@ impl RoastScreen {
             .and_then(|r| r.green_weight_g)
             .or_else(|| st.next.as_ref().and_then(|n| n.green_weight_g));
         let reference = roast.map_or_else(
-            || "No reference".to_owned(),
+            || t("No reference").to_owned(),
             |r| {
-                r.reference.as_ref().map_or("No reference".to_owned(), |r| {
-                    format!("Reference Roast #{}", r.number)
-                })
+                r.reference
+                    .as_ref()
+                    .map_or(t("No reference").to_owned(), |r| {
+                        tf("Reference Roast #{n}", &[("n", &r.number)])
+                    })
             },
         );
         let big = self.big;
@@ -727,7 +730,7 @@ impl RoastScreen {
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
                     .text_color(rail::accent())
-                    .child("ROASTRO"),
+                    .child(t("ROASTRO")),
             )
             .child(
                 div()
@@ -791,7 +794,7 @@ impl RoastScreen {
                             .when(!big, |d| d.bg(white(0.2)))
                             .child(div().size(px(10.)).rounded_full().bg(rgb(0x0000_0000))),
                     )
-                    .child("Big numbers"),
+                    .child(t("Big numbers")),
             )
     }
 }
@@ -868,8 +871,9 @@ impl Render for RoastScreen {
                     .bg(rgb(0x00b9_1c1c))
                     .text_color(white(0.98))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(format!(
-                        "No readings since {since} · reconnecting · the roast continues if they return within 5 minutes"
+                    .child(tf(
+                        "No readings since {since} · reconnecting · the roast continues if they return within 5 minutes",
+                        &[("since", &since)],
                     ))
             }))
             .children(self.big.then(|| self.strip()))

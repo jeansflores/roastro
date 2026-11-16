@@ -17,6 +17,7 @@ pub mod report;
 #[allow(missing_docs)]
 pub mod wire;
 
+use i18n::t;
 use std::future::Future;
 use std::path::PathBuf;
 use std::pin::Pin;
@@ -174,7 +175,7 @@ async fn open(target: &Target, demo: Option<&DemoHook>) -> Result<Client, Failur
         Target::Demo => {
             let failure = |error: String| Failure {
                 error,
-                advice: "The built-in simulator could not start.".into(),
+                advice: t("The built-in simulator could not start.").into(),
             };
             let hook = demo.ok_or_else(|| failure("no simulator in this build".into()))?;
             let url = hook().await.map_err(|e| failure(e.to_string()))?;

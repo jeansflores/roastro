@@ -1,5 +1,6 @@
 //! Roasts out of Roastro ("Exporting roasts, old data and backups", #54).
 
+use i18n::t;
 use std::fmt::Write as _;
 
 use recorder::Millis;
@@ -77,7 +78,10 @@ pub fn roast_csv(roast: &RoastDoc, columns: &Columns, time_scale: f64) -> String
     };
     for e in &roast.events {
         if let Some(i) = row_of(e.at) {
-            marks[i].0.push(e.kind.replace('_', " "));
+            marks[i].0.push(e.kind.parse().map_or_else(
+                |_| e.kind.replace('_', " "),
+                |k| crate::engine::event_name(k).to_owned(),
+            ));
         }
     }
     for n in &roast.notes {
@@ -88,9 +92,9 @@ pub fn roast_csv(roast: &RoastDoc, columns: &Columns, time_scale: f64) -> String
 
     let mut out = String::from("\u{feff}");
     let mut header = vec![
-        "Roast time (s)".to_owned(),
-        "Roast time".to_owned(),
-        "Instant".to_owned(),
+        t("Roast time (s)").to_owned(),
+        t("Roast time").to_owned(),
+        t("Instant").to_owned(),
     ];
     header.extend(points.iter().map(|p| match *p {
         "bt" => "BT (°C)".to_owned(),
@@ -98,7 +102,7 @@ pub fn roast_csv(roast: &RoastDoc, columns: &Columns, time_scale: f64) -> String
         other => other.to_owned(),
     }));
     header.insert(5.min(header.len()), "RoR (°C/min)".to_owned());
-    header.extend(["Event".to_owned(), "Note".to_owned()]);
+    header.extend([t("Event").to_owned(), t("Note").to_owned()]);
     let _ = writeln!(out, "{}", header.join(";"));
     for (i, &at) in columns.at.iter().enumerate() {
         let s = roast_s(at);
@@ -203,7 +207,7 @@ mod tests {
                 fc[5].as_str(),
                 fc[7].as_str()
             ),
-            ("180,5", "", "12,2", "first crack"),
+            ("180,5", "", "12,2", "First crack"),
             "decimal comma, a missing value left empty, the event on its row"
         );
         assert!(

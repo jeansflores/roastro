@@ -4,12 +4,13 @@
 //! may fall inside a Gap) and in roast order; weights positive; a reference
 //! is another Done roast.
 
+use i18n::{t, tf};
 use recorder::{Input, Millis};
 use roast::{EventKind, Source};
 use store::{RoastId, RoastPatch, RoastState};
 use uuid::Uuid;
 
-use super::{Edit, Engine};
+use super::{Edit, Engine, event_name};
 use crate::api::ApiError;
 use crate::wire::{
     BackupOut, CoffeeIn, CoffeeOut, CoffeePatch, Live, NextRoastIn, NextRoastOut, NoteIn, NoteOut,
@@ -93,6 +94,22 @@ impl Engine {
             Edit::RestoreBackup(path, reply) => {
                 let _ = reply.send(self.restore(&path));
             }
+            Edit::Language(reply) => {
+                let _ = reply.send(
+                    self.recording
+                        .store()
+                        .setting("language")
+                        .map_err(ApiError::internal),
+                );
+            }
+            Edit::SetLanguage(tag, reply) => {
+                let _ = reply.send(
+                    self.recording
+                        .store_mut()
+                        .set_setting("language", &tag)
+                        .map_err(ApiError::internal),
+                );
+            }
         }
     }
 
@@ -127,11 +144,23 @@ impl Engine {
         if let Some(other) = out_of_order {
             return Err(ApiError::unprocessable(
                 "event_out_of_order",
-                format!(
-                    "{kind} must come {} {}; move that one first",
-                    if other.kind < kind { "after" } else { "before" },
-                    other.kind
-                ),
+                if other.kind < kind {
+                    tf(
+                        "{event} must come after {other}; move that one first",
+                        &[
+                            ("event", &event_name(kind)),
+                            ("other", &event_name(other.kind)),
+                        ],
+                    )
+                } else {
+                    tf(
+                        "{event} must come before {other}; move that one first",
+                        &[
+                            ("event", &event_name(kind)),
+                            ("other", &event_name(other.kind)),
+                        ],
+                    )
+                },
             ));
         }
         let receiving = self.recording.current() == Some(id);
@@ -153,7 +182,10 @@ impl Engine {
         if !kind.is_manual_only() {
             return Err(ApiError::unprocessable(
                 "event_not_deletable",
-                format!("{kind} can only be moved, not removed"),
+                tf(
+                    "{event} can only be moved, not removed",
+                    &[("event", &event_name(kind))],
+                ),
             ));
         }
         self.recording
@@ -168,7 +200,7 @@ impl Engine {
         if at > (self.now)() {
             return Err(ApiError::unprocessable(
                 "event_in_future",
-                "that instant has not happened yet",
+                t("that instant has not happened yet"),
             ));
         }
         let (before, after) = self
@@ -188,14 +220,14 @@ impl Engine {
         } else {
             Err(ApiError::unprocessable(
                 "event_outside_samples",
-                "that instant is outside the roast's recorded readings",
+                t("that instant is outside the roast's recorded readings"),
             ))
         }
     }
 
     fn add_note(&mut self, id: RoastId, body: &NoteIn) -> Result<NoteOut, ApiError> {
         self.stored(id)?;
-        let text = non_empty(&body.text, "empty_note", "a note needs some text")?;
+        let text = non_empty(&body.text, "empty_note", t("a note needs some text"))?;
         self.check_time(id, None, body.at)?;
         let note = self
             .recording
@@ -220,7 +252,7 @@ impl Engine {
         let text = body
             .text
             .as_deref()
-            .map(|t| non_empty(t, "empty_note", "a note needs some text"))
+            .map(|text| non_empty(text, "empty_note", t("a note needs some text")))
             .transpose()?;
         if let Some(at) = body.at {
             self.check_time(id, None, at)?;
@@ -292,7 +324,7 @@ impl Engine {
             if self.recording.is_before_drop() {
                 return Err(ApiError::conflict(
                     "roast_recording",
-                    "close or drop the roast before discarding it",
+                    t("close or drop the roast before discarding it"),
                 ));
             }
             self.apply(Input::ClosePressed)?; // cut the tail short
@@ -317,7 +349,7 @@ impl Engine {
         {
             return Err(ApiError::conflict(
                 "roast_not_recording",
-                "only a roast between Charge and Drop can be closed",
+                t("only a roast between Charge and Drop can be closed"),
             ));
         }
         self.apply(Input::ClosePressed)?;
@@ -375,7 +407,7 @@ impl Engine {
     }
 
     fn add_coffee(&mut self, body: &CoffeeIn) -> Result<CoffeeOut, ApiError> {
-        let name = non_empty(&body.name, "empty_name", "a coffee needs a name")?;
+        let name = non_empty(&body.name, "empty_name", t("a coffee needs a name"))?;
         let store = self.recording.store_mut();
         let id = store.add_coffee(name).map_err(ApiError::internal)?;
         let details = store::CoffeeChange {
@@ -396,7 +428,7 @@ impl Engine {
         let name = body
             .name
             .as_deref()
-            .map(|n| non_empty(n, "empty_name", "a coffee needs a name").map(str::to_owned))
+            .map(|n| non_empty(n, "empty_name", t("a coffee needs a name")).map(str::to_owned))
             .transpose()?;
         let trimmed = |v: &Option<String>| v.as_deref().map(|v| v.trim().to_owned());
         let change = store::CoffeeChange {
@@ -444,12 +476,14 @@ impl Engine {
     fn valid_reference(&self, reference: RoastId, of: Option<RoastId>) -> Result<(), ApiError> {
         let invalid = |why: &str| Err(ApiError::unprocessable("invalid_reference", why.to_owned()));
         if of == Some(reference) {
-            return invalid("a roast cannot be its own reference");
+            return invalid(t("a roast cannot be its own reference"));
         }
         match self.recording.store().roast(reference) {
             Ok(r) if r.state == RoastState::Done && r.discarded_at.is_none() => Ok(()),
-            Ok(_) => invalid("the reference must be a Done roast that is not discarded"),
-            Err(store::Error::NoRoast(_)) => invalid("no such roast"),
+            Ok(_) => invalid(t(
+                "the reference must be a Done roast that is not discarded",
+            )),
+            Err(store::Error::NoRoast(_)) => invalid(t("no such roast")),
             Err(other) => Err(ApiError::internal(other)),
         }
     }
@@ -502,7 +536,7 @@ fn positive(weight_g: i64) -> Result<(), ApiError> {
     } else {
         Err(ApiError::invalid(
             "invalid_weight",
-            "weights are positive grams",
+            t("weights are positive grams"),
         ))
     }
 }

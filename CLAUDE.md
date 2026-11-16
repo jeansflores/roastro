@@ -4,7 +4,7 @@ Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. 
 
 ## Rules
 
-- **Everything in English**: code, comments, docs, commit messages, UI text. Talk to Jean in Brazilian Portuguese.
+- **Everything in English**: code, comments, docs, commit messages. The app speaks Portuguese (Brazil) and English: UI text is written in English in the code as `t("…")` / `tf("…", …)` and translated in `crates/i18n/locales/pt-BR.toml`; a test fails on a key without Portuguese or a translation no longer used. Talk to Jean in Brazilian Portuguese.
 - **Writes to the machine are dangerous.** It is a gas roaster. Any code path that writes to a PLC must refuse non-loopback targets unless the user passes an explicit opt-in (`--allow-write` in CLIs, an explicit confirmation in a UI). Remote access is read-only. Never weaken this guard, never default it on.
 - **`configs/regmap.json` is provisional.** Its addresses are made up for the simulator. The real layout is known from Artisan's Caloratto 2.0 preset (`docs/context.md`, "Register map"); moving to it waits on two map-format additions. `configs/regmap.caloratto-2.0.json` is a read-only test map for the real machine and must stay without writable points. Point `name`s are the contract between the simulator and the app: never rename them. Code must look points up by name, never hard-code addresses.
 - Do not copy code from Artisan (GPLv3). Reading its `.aset` files for the register map is fine.
@@ -17,6 +17,7 @@ Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. 
 Cargo workspace at the root:
 
 ```
+crates/i18n      the app's languages: English keys in the code, pt-BR.toml beside them; the language follows Windows until chosen
 crates/roast     roast vocabulary (event kinds, sources) and pure calculations (RoR, metrics: phases, DTR, weight loss)
 crates/recorder  pure lifecycle state machine: readings in, roasts out (Charge/Drop detection, turning point, lead-in, tail, Gaps)
 crates/store     SQLite: schema, embedded migrations on PRAGMA user_version, the roast record

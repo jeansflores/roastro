@@ -4,6 +4,7 @@
 //! automatically detected Charge still takes it into the roast. The live
 //! screen only shows a summary of it.
 
+use i18n::{t, tf};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -103,14 +104,14 @@ fn date(at: i64) -> String {
 fn coffee_choices(coffees: &[CoffeeOut]) -> Vec<Choice> {
     let mut choices = vec![Choice {
         value: None,
-        title: "No coffee".into(),
+        title: t("No coffee").into(),
     }];
     choices.extend(coffees.iter().map(|c| Choice {
         value: Some(c.id),
         title: if c.lot.is_empty() {
             c.name.clone().into()
         } else {
-            format!("{} · lot {}", c.name, c.lot).into()
+            tf("{name} · lot {lot}", &[("name", &c.name), ("lot", &c.lot)]).into()
         },
     }));
     choices
@@ -122,12 +123,12 @@ fn reference_choices(roasts: &[RoastDoc], suggested: Option<Uuid>) -> Vec<Choice
     let mut choices: Vec<Choice> = roasts
         .iter()
         .map(|r| {
-            let mut parts = vec![format!("Roast #{}", r.number)];
+            let mut parts = vec![tf("Roast #{n}", &[("n", &r.number)])];
             parts.extend(r.coffee.as_ref().map(|c| c.name.clone()));
             parts.extend(r.charge_at.map(date));
             let mut title = parts.join(" · ");
             if Some(r.id) == suggested {
-                title.push_str(" (latest of this coffee)");
+                title.push_str(t(" (latest of this coffee)"));
             }
             Choice {
                 value: Some(r.id),
@@ -137,7 +138,7 @@ fn reference_choices(roasts: &[RoastDoc], suggested: Option<Uuid>) -> Vec<Choice
         .collect();
     choices.push(Choice {
         value: None,
-        title: "No reference".into(),
+        title: t("No reference").into(),
     });
     choices
 }
@@ -157,7 +158,7 @@ impl NewRoastPage {
         let reference = picker(window, cx);
         let green = cx.new(|cx| InputState::new(window, cx).placeholder("0.000"));
         let roasted_by = cx.new(|cx| InputState::new(window, cx));
-        let new_coffee = cx.new(|cx| InputState::new(window, cx).placeholder("New coffee"));
+        let new_coffee = cx.new(|cx| InputState::new(window, cx).placeholder(t("New coffee")));
         let subscriptions = vec![
             cx.observe(&live, |this, live, cx| this.live_changed(&live, cx)),
             cx.subscribe_in(
@@ -301,7 +302,7 @@ impl NewRoastPage {
             .engine
             .ask(|r| Request::Edit(Edit::PutNextRoast(next, r)))
         else {
-            self.message = Some("Roastro is busy; try again".into());
+            self.message = Some(t("Roastro is busy; try again").into());
             cx.notify();
             return;
         };
@@ -334,7 +335,7 @@ impl NewRoastPage {
     fn save_green(&mut self, cx: &mut Context<Self>) {
         let text = self.green.read(cx).value().to_string();
         let Some(green) = grams(&text) else {
-            self.message = Some("green weight: kilograms, like 5.000".into());
+            self.message = Some(t("green weight: kilograms, like 5.000").into());
             cx.notify();
             return;
         };
@@ -446,9 +447,9 @@ impl NewRoastPage {
     fn preview_card(&self) -> AnyElement {
         let Some(st) = &self.preview else {
             let text = if self.preview_for.is_some() {
-                "Reading the reference…"
+                t("Reading the reference…")
             } else {
-                "No reference: the live chart has nothing behind the curve."
+                t("No reference: the live chart has nothing behind the curve.")
             };
             return div()
                 .text_sm()
@@ -462,7 +463,7 @@ impl NewRoastPage {
             .flex()
             .flex_col()
             .gap_3()
-            .child(label("Reference preview"))
+            .child(label(t("Reference preview")))
             .child(
                 div()
                     .font_weight(FontWeight::SEMIBOLD)
@@ -470,8 +471,11 @@ impl NewRoastPage {
                         let coffee = r
                             .coffee
                             .as_ref()
-                            .map_or("No coffee set", |c| c.name.as_str());
-                        format!("Roast #{} · {coffee}", r.number)
+                            .map_or(t("No coffee set"), |c| c.name.as_str());
+                        tf(
+                            "Roast #{n} · {coffee}",
+                            &[("n", &r.number), ("coffee", &coffee)],
+                        )
                     })),
             )
             .child(div().h(px(240.)).w_full().child(chart::chart(
@@ -534,13 +538,11 @@ impl Render for NewRoastPage {
                         div()
                             .text_2xl()
                             .font_weight(FontWeight::BOLD)
-                            .child("New roast"),
+                            .child(t("New roast")),
                     )
-                    .child(
-                        div()
-                            .text_color(white(0.55))
-                            .child("What the next Charge takes into the roast. Saved as you go."),
-                    ),
+                    .child(div().text_color(white(0.55)).child(t(
+                        "What the next Charge takes into the roast. Saved as you go.",
+                    ))),
             )
             .children(recording.map(|n| {
                 div()
@@ -548,8 +550,9 @@ impl Render for NewRoastPage {
                     .rounded_lg()
                     .border_1()
                     .border_color(chart::faded(chart::bt(), 0.45))
-                    .child(format!(
-                        "Roast #{n} is recording now. This prepares the roast after it."
+                    .child(tf(
+                        "Roast #{n} is recording now. This prepares the roast after it.",
+                        &[("n", &n)],
                     ))
             }))
             .children(self.message.clone().map(|m| {
@@ -571,9 +574,9 @@ impl Render for NewRoastPage {
                             .flex_col()
                             .gap_4()
                             .child(field(
-                                "Coffee",
+                                t("Coffee"),
                                 Select::new(&self.coffee)
-                                    .placeholder("Choose a coffee")
+                                    .placeholder(t("Choose a coffee"))
                                     .into_any_element(),
                             ))
                             .child(
@@ -581,33 +584,35 @@ impl Render for NewRoastPage {
                                     .flex()
                                     .gap_2()
                                     .child(Input::new(&self.new_coffee).id("new-coffee").flex_1())
-                                    .child(Button::new("add-coffee").label("Add coffee").on_click(
-                                        cx.listener(|this, _, window, cx| {
-                                            this.add_coffee(window, cx);
-                                        }),
-                                    )),
+                                    .child(
+                                        Button::new("add-coffee").label(t("Add coffee")).on_click(
+                                            cx.listener(|this, _, window, cx| {
+                                                this.add_coffee(window, cx);
+                                            }),
+                                        ),
+                                    ),
                             )
                             .child(
                                 div()
                                     .flex()
                                     .gap_3()
                                     .child(field(
-                                        "Green weight (kg)",
+                                        t("Green weight (kg)"),
                                         Input::new(&self.green)
                                             .id("green-weight")
                                             .into_any_element(),
                                     ))
                                     .child(field(
-                                        "Roasted by",
+                                        t("Roasted by"),
                                         Input::new(&self.roasted_by)
                                             .id("roasted-by")
                                             .into_any_element(),
                                     )),
                             )
                             .child(field(
-                                "Reference roast",
+                                t("Reference roast"),
                                 Select::new(&self.reference)
-                                    .placeholder("No reference")
+                                    .placeholder(t("No reference"))
                                     .into_any_element(),
                             ))
                             .child(
@@ -618,14 +623,14 @@ impl Render for NewRoastPage {
                                     .child(
                                         Button::new("go-live")
                                             .primary()
-                                            .label("Go to the live roast")
+                                            .label(t("Go to the live roast"))
                                             .on_click(cx.listener(|_, _, _, cx| cx.emit(GoLive))),
                                     )
                                     .child(
                                         div()
                                             .text_xs()
                                             .text_color(white(0.4))
-                                            .child("Charge is detected automatically."),
+                                            .child(t("Charge is detected automatically.")),
                                     ),
                             ),
                     )

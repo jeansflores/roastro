@@ -5,6 +5,7 @@
 // Pixel math converts between f64 roast values and f32 pixels all the time.
 #![allow(clippy::cast_possible_truncation, clippy::cast_precision_loss)]
 
+use i18n::{t, tf};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -213,7 +214,7 @@ impl ComparePage {
                 .ok()?;
             this.update(cx, |this, cx| {
                 this.message = Some(match result {
-                    Ok(_) => format!("The next roast will follow Roast #{number}."),
+                    Ok(_) => tf("The next roast will follow Roast #{n}.", &[("n", &number)]),
                     Err(err) => err.to_string(),
                 });
                 cx.notify();
@@ -355,13 +356,13 @@ impl ComparePage {
     fn figures(&self) -> impl IntoElement {
         let figures: Vec<[Option<f64>; 7]> = self.loaded.iter().map(figures).collect();
         let names = [
-            "Total",
-            "First crack",
-            "Development",
+            t("Total"),
+            t("First crack"),
+            t("Development"),
             "DTR",
-            "Drop BT",
-            "Weight loss",
-            "RoR fall",
+            t("Drop BT"),
+            t("Weight loss"),
+            t("RoR fall"),
         ];
         let show = |row: usize, v: Option<f64>| match (row, v) {
             (_, None) => "—".to_owned(),
@@ -495,7 +496,7 @@ fn paint(
         text(
             window,
             cx,
-            "First crack",
+            t("First crack"),
             point(x(0.0) + px(4.), main.top()),
             label_color,
         );
@@ -625,7 +626,7 @@ impl Render for ComparePage {
                 .doc
                 .coffee
                 .as_ref()
-                .map_or_else(|| "No coffee set".to_owned(), |c| c.name.clone());
+                .map_or_else(|| t("No coffee set").to_owned(), |c| c.name.clone());
             div()
                 .flex()
                 .items_center()
@@ -656,7 +657,7 @@ impl Render for ComparePage {
                     Button::new(SharedString::from(format!("compare-reference-{number}")))
                         .ghost()
                         .xsmall()
-                        .label("Use as reference")
+                        .label(t("Use as reference"))
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.use_as_reference(id, number, cx);
                         })),
@@ -691,22 +692,21 @@ impl Render for ComparePage {
                         div()
                             .text_2xl()
                             .font_weight(FontWeight::BOLD)
-                            .child("Compare"),
+                            .child(t("Compare")),
                     )
                     .children(chips)
                     .child(div().flex_1())
                     .child(
-                        toggle("align-charge", "Align on Charge", align == Align::Charge).on_click(
-                            cx.listener(|this, _, _, cx| {
+                        toggle("align-charge", t("Align on Charge"), align == Align::Charge)
+                            .on_click(cx.listener(|this, _, _, cx| {
                                 this.align = Align::Charge;
                                 cx.notify();
-                            }),
-                        ),
+                            })),
                     )
                     .child(
                         toggle(
                             "align-fc",
-                            "Align on First crack",
+                            t("Align on First crack"),
                             align == Align::FirstCrack,
                         )
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -760,9 +760,9 @@ impl Render for ComparePage {
                     .border_t_1()
                     .border_color(white(0.08))
                     .child(self.figures())
-                    .child(div().pt_2().text_xs().text_color(white(0.35)).child(
+                    .child(div().pt_2().text_xs().text_color(white(0.35)).child(t(
                         "Solid BT, dotted RoR, dashed ET. Differences are against the first roast.",
-                    )),
+                    ))),
             )
     }
 }

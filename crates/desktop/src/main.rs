@@ -129,6 +129,7 @@ fn main() -> anyhow::Result<()> {
             demo: Some(demo),
         })
     })?;
+    use_language(&runtime, &running.requests);
     std::thread::Builder::new()
         .name("tokio".into())
         .spawn(move || runtime.block_on(std::future::pending::<()>()))?;
@@ -170,4 +171,22 @@ fn main() -> anyhow::Result<()> {
             }
         });
     Ok(())
+}
+
+/// The language chosen in the app (kept in the database), else the system's.
+fn use_language(
+    runtime: &tokio::runtime::Runtime,
+    requests: &tokio::sync::mpsc::Sender<roastro::engine::Request>,
+) {
+    let chosen = runtime.block_on(async {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        requests
+            .send(roastro::engine::Request::Edit(
+                roastro::engine::Edit::Language(tx),
+            ))
+            .await
+            .ok()?;
+        rx.await.ok()?.ok()?
+    });
+    i18n::set(chosen.map_or_else(i18n::Lang::system, |tag| i18n::Lang::from_tag(&tag)));
 }

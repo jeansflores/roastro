@@ -692,4 +692,32 @@ impl Store {
         };
         self.use_machine(id)
     }
+
+    /// An app setting, if it was ever set.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn setting(&self, key: &str) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row("SELECT value FROM app_setting WHERE key = ?1", [key], |r| {
+                r.get(0)
+            })
+            .optional()?)
+    }
+
+    /// Sets an app setting.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn set_setting(&mut self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO app_setting (key, value) VALUES (?1, ?2)
+             ON CONFLICT (key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
 }

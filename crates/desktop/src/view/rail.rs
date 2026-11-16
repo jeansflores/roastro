@@ -9,6 +9,7 @@ use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::Input;
 use gpui_kit::prelude::*;
 use gpui_kit::{Context, FontWeight, Hsla, IntoElement, SharedString, div, px};
+use i18n::{t, tf};
 use roast::EventKind;
 use roastro::wire::{EventOut, NoteOut};
 
@@ -100,7 +101,13 @@ pub fn label(text: impl Into<SharedString>) -> impl IntoElement {
 /// `now vs. ref` as "ref 201.3 · +1.2", when both are known.
 fn vs_reference(now: Option<f64>, then: Option<f64>) -> Option<String> {
     let (now, then) = now.zip(then)?;
-    Some(format!("ref {then:.1} · {:+.1}", now - then))
+    Some(tf(
+        "ref {then} · {diff}",
+        &[
+            ("then", &format!("{then:.1}")),
+            ("diff", &format!("{:+.1}", now - then)),
+        ],
+    ))
 }
 
 /// The live readouts: roast time, `BT`, `RoR`, `ET`, air and gas.
@@ -122,21 +129,21 @@ pub fn live_figures(st: &LiveState) -> [Figure; 6] {
     [
         Figure::new(
             if st.roast.is_some() {
-                "Roast time"
+                t("Roast time")
             } else {
-                "Waiting for charge"
+                t("Waiting for charge")
             },
             time,
             "",
             white(0.95),
         ),
-        Figure::new("Bean temp · BT", fmt1(value("bt")), "°C", chart::bt())
+        Figure::new(t("Bean temp · BT"), fmt1(value("bt")), "°C", chart::bt())
             .sub(vs_reference(value("bt"), reference.0)),
         Figure::new("RoR", fmt1(ror), "°/min", chart::ror()),
-        Figure::new("Air temp · ET", fmt1(value("et")), "°C", chart::et())
+        Figure::new(t("Air temp · ET"), fmt1(value("et")), "°C", chart::et())
             .sub(vs_reference(value("et"), reference.1)),
-        Figure::new("Air", fmt0(value("fan")), "%", chart::air()),
-        Figure::new("Gas", fmt0(value("gas_fb")), "%", chart::gas()),
+        Figure::new(t("Air"), fmt0(value("fan")), "%", chart::air()),
+        Figure::new(t("Gas"), fmt0(value("gas_fb")), "%", chart::gas()),
     ]
 }
 
@@ -154,31 +161,31 @@ pub fn summary_figures(st: &LiveState) -> [Figure; 5] {
     let dash = || "—".to_owned();
     [
         Figure::new(
-            "Total time",
+            t("Total time"),
             total.map_or_else(dash, clock),
             "",
             white(0.95),
         ),
         Figure::new(
-            "Development time ratio",
+            t("Development time ratio"),
             dtr.map_or_else(dash, |d| format!("{:.1}", d * 100.0)),
             "%",
             chart::ror(),
         ),
         Figure::new(
-            "Development",
+            t("Development"),
             development.map_or_else(dash, clock),
             "",
             white(0.95),
         ),
         Figure::new(
-            "Drop BT",
+            t("Drop BT"),
             fmt1(drop.and_then(|at| st.bt_at(at))),
             "°C",
             chart::bt(),
         ),
         Figure::new(
-            "Weight loss",
+            t("Weight loss"),
             loss.map_or_else(dash, |l| format!("{:.1}", l * 100.0)),
             "%",
             white(0.95),
@@ -284,7 +291,7 @@ pub(crate) fn phases(st: &LiveState) -> impl IntoElement {
                 .flex()
                 .justify_between()
                 .items_baseline()
-                .child(label("Phases"))
+                .child(label(t("Phases")))
                 .child(
                     div()
                         .flex()
@@ -292,7 +299,7 @@ pub(crate) fn phases(st: &LiveState) -> impl IntoElement {
                         .gap_1()
                         .text_xs()
                         .text_color(white(0.6))
-                        .child("DTR")
+                        .child(t("DTR"))
                         .child(
                             div()
                                 .text_base()
@@ -306,6 +313,16 @@ pub(crate) fn phases(st: &LiveState) -> impl IntoElement {
         )
         .child(bar)
         .child(div().flex().gap_2().children(columns))
+}
+
+/// How an event came to be, in the app's language.
+pub(crate) fn source_name(source: &str) -> &'static str {
+    match source {
+        "auto" => t("auto"),
+        "manual" => t("manual"),
+        "computed" => t("computed"),
+        _ => "",
+    }
 }
 
 /// A dot on the timeline's rule.
@@ -390,14 +407,14 @@ impl RoastScreen {
         let next = self.state.next.as_ref();
         let parts: Vec<String> = [
             next.and_then(|n| n.coffee_name.clone())
-                .or_else(|| Some("No coffee set".to_owned())),
+                .or_else(|| Some(t("No coffee set").to_owned())),
             next.and_then(|n| n.green_weight_g)
                 .map(|g| format!("{} kg", super::kilograms(g))),
             next.map(|n| n.roasted_by.clone()).filter(|b| !b.is_empty()),
-            Some(
-                next.and_then(|n| n.reference_number)
-                    .map_or_else(|| "no reference".to_owned(), |n| format!("reference #{n}")),
-            ),
+            Some(next.and_then(|n| n.reference_number).map_or_else(
+                || t("no reference").to_owned(),
+                |n| tf("reference #{n}", &[("n", &n)]),
+            )),
         ]
         .into_iter()
         .flatten()
@@ -410,7 +427,7 @@ impl RoastScreen {
             .child(div().text_sm().child(parts.join(" · ")))
             .child(
                 Button::new("prepare-next")
-                    .label("Prepare the next roast")
+                    .label(t("Prepare the next roast"))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(super::OpenNewRoast))),
             )
     }
@@ -426,7 +443,7 @@ impl RoastScreen {
                 div()
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
-                    .child("Next roast"),
+                    .child(t("Next roast")),
             )
             .child(self.next_summary(cx))
             .children((!self.big).then(|| pair_large(bt, et)))
@@ -434,15 +451,12 @@ impl RoastScreen {
                 Button::new("next-event")
                     .primary()
                     .large()
-                    .label("Charge")
+                    .label(t("Charge"))
                     .on_click(cx.listener(|this, _, _, cx| this.press(EventKind::Charge, cx))),
             )
-            .child(
-                div()
-                    .text_xs()
-                    .text_color(white(0.4))
-                    .child("Charge is detected automatically; press it only if detection misses."),
-            )
+            .child(div().text_xs().text_color(white(0.4)).child(t(
+                "Charge is detected automatically; press it only if detection misses.",
+            )))
     }
 
     /// Events and notes in roast order, then "now" with the marks while
@@ -475,65 +489,78 @@ impl RoastScreen {
                 .xsmall()
                 .label("✕")
         };
-        let rows = entries.into_iter().map(|entry| {
-            let row = div().flex().items_center().gap_3().py_1().text_sm();
-            match entry {
-                Entry::Event(e) => {
-                    let kind = e.kind.parse::<EventKind>().ok();
-                    let name = kind.map_or(e.kind, chart::label);
-                    row.child(dot(Some(accent()), accent()))
-                        .child(time(e.at))
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(name))
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(chart::bt())
-                                .child(format!("{}°", fmt1(st.bt_at(e.at)))),
-                        )
-                        .child(
-                            div()
-                                .text_xs()
-                                .text_color(white(0.3))
-                                .child(e.source.to_uppercase()),
-                        )
-                        .child(div().flex_1())
-                        .children(kind.filter(|k| k.is_manual_only()).map(|kind| {
-                            remove(format!("unmark-{}", kind.as_str()))
-                                .on_click(cx.listener(move |this, _, _, cx| this.unmark(kind, cx)))
-                        }))
-                }
-                Entry::Note(n, note) => {
-                    let id = note.id;
-                    row.child(dot(Some(white(0.9)), white(0.9)))
-                        .child(time(note.at))
-                        .child(
-                            div()
-                                .flex_none()
-                                .size(px(16.))
-                                .rounded_full()
-                                .bg(white(0.9))
-                                .text_color(gpui_kit::rgb(0x0000_0000))
-                                .text_xs()
-                                .font_weight(FontWeight::BOLD)
-                                .flex()
-                                .items_center()
-                                .justify_center()
-                                .child(n.to_string()),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .text_color(white(0.85))
-                                .child(note.text.clone()),
-                        )
-                        .child(
-                            remove(format!("remove-note-{n}")).on_click(
+        let rows =
+            entries.into_iter().map(|entry| {
+                let row = div().flex().items_center().gap_3().py_1().text_sm();
+                match entry {
+                    Entry::Event(e) => {
+                        let kind = e.kind.parse::<EventKind>().ok();
+                        let name = kind.map_or(e.kind, chart::label);
+                        row.child(dot(Some(accent()), accent()))
+                            .child(time(e.at))
+                            .child(
+                                // Longer in Portuguese: it gives way, the ✕ stays.
+                                div()
+                                    .min_w_0()
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child(name),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_xs()
+                                    .text_color(chart::bt())
+                                    .child(format!("{}°", fmt1(st.bt_at(e.at)))),
+                            )
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .text_xs()
+                                    .text_color(white(0.3))
+                                    .child(source_name(e.source).to_uppercase()),
+                            )
+                            .child(div().flex_1())
+                            .children(kind.filter(|k| k.is_manual_only()).map(|kind| {
+                                div().flex_none().child(
+                                    remove(format!("unmark-{}", kind.as_str())).on_click(
+                                        cx.listener(move |this, _, _, cx| this.unmark(kind, cx)),
+                                    ),
+                                )
+                            }))
+                    }
+                    Entry::Note(n, note) => {
+                        let id = note.id;
+                        row.child(dot(Some(white(0.9)), white(0.9)))
+                            .child(time(note.at))
+                            .child(
+                                div()
+                                    .flex_none()
+                                    .size(px(16.))
+                                    .rounded_full()
+                                    .bg(white(0.9))
+                                    .text_color(gpui_kit::rgb(0x0000_0000))
+                                    .text_xs()
+                                    .font_weight(FontWeight::BOLD)
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .child(n.to_string()),
+                            )
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_color(white(0.85))
+                                    .child(note.text.clone()),
+                            )
+                            .child(remove(format!("remove-note-{n}")).on_click(
                                 cx.listener(move |this, _, _, cx| this.remove_note(id, cx)),
-                            ),
-                        )
+                            ))
+                    }
                 }
-            }
-        });
+            });
         let now = st.recording().then(|| {
             let next = st.next_event().filter(|k| *k != EventKind::Drop);
             let others = [
@@ -547,8 +574,8 @@ impl RoastScreen {
                 *k != EventKind::SecondCrack || st.event_at(EventKind::FirstCrack).is_some()
             });
             let hint = |kind: EventKind| match kind {
-                EventKind::DryEnd => " · color change",
-                EventKind::FirstCrack => " · first pops",
+                EventKind::DryEnd => t(" · color change"),
+                EventKind::FirstCrack => t(" · first pops"),
                 _ => "",
             };
             div()
@@ -570,7 +597,7 @@ impl RoastScreen {
                                     .map_or_else(String::new, |at| clock(st.roast_s(at))),
                             ),
                         )
-                        .child("now"),
+                        .child(t("now")),
                 )
                 .child(
                     div()
@@ -595,7 +622,7 @@ impl RoastScreen {
                             Button::new("drop")
                                 .outline()
                                 .small()
-                                .label("Drop")
+                                .label(t("Drop"))
                                 .on_click(cx.listener(|this, _, _, cx| {
                                     this.press(EventKind::Drop, cx);
                                 })),
@@ -613,7 +640,7 @@ impl RoastScreen {
                 .child(dot(None, white(0.25)))
                 .child(div().w(px(44.)).text_xs().child(clock(s)))
                 .child(chart::label(kind))
-                .child(div().text_xs().child("IN REFERENCE"))
+                .child(div().text_xs().child(t("IN REFERENCE")))
         });
         div()
             .id("timeline")
@@ -630,12 +657,12 @@ impl RoastScreen {
                     .flex()
                     .justify_between()
                     .items_baseline()
-                    .child(label("Timeline"))
+                    .child(label(t("Timeline")))
                     .child(
                         div()
                             .text_xs()
                             .text_color(white(0.3))
-                            .child("click the chart to mark the past"),
+                            .child(t("click the chart to mark the past")),
                     ),
             )
             .child(
@@ -658,7 +685,7 @@ impl RoastScreen {
                     .child(Input::new(&self.note).id("note").flex_1())
                     .child(
                         Button::new("add-note")
-                            .label("Add note")
+                            .label(t("Add note"))
                             .on_click(cx.listener(|this, _, window, cx| this.add_note(window, cx))),
                     ),
             )
@@ -673,8 +700,8 @@ impl RoastScreen {
             .as_ref()
             .and_then(|r| r.metrics.weight_loss_ratio)
             .map_or_else(
-                || "loss —".to_owned(),
-                |l| format!("−{:.1} % loss", l * 100.0),
+                || t("loss —").to_owned(),
+                |l| tf("−{v} % loss", &[("v", &format!("{:.1}", l * 100.0))]),
             );
         div()
             .flex()
@@ -686,12 +713,12 @@ impl RoastScreen {
             .children(self.state.roast.as_ref().map(|r| {
                 let id = r.id;
                 Button::new("open-roast")
-                    .label(format!("Open Roast #{} in Roasts", r.number))
+                    .label(tf("Open Roast #{n} in Roasts", &[("n", &r.number)]))
                     .on_click(cx.listener(move |_, _, _, cx| {
                         cx.emit(crate::roasts::OpenRoast(id));
                     }))
             }))
-            .child(label("Roasted weight (kg)"))
+            .child(label(t("Roasted weight (kg)")))
             .child(
                 div()
                     .flex()
@@ -700,7 +727,7 @@ impl RoastScreen {
                     .child(Input::new(&self.weight).id("roasted-weight").w(px(120.)))
                     .child(
                         Button::new("save-weight")
-                            .label("Save")
+                            .label(t("Save"))
                             .on_click(cx.listener(|this, _, _, cx| this.save_weight(cx))),
                     )
                     .child(div().text_sm().text_color(white(0.6)).child(loss)),
@@ -710,7 +737,7 @@ impl RoastScreen {
                     .pt_3()
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
-                    .child("Next roast"),
+                    .child(t("Next roast")),
             )
             .child(self.next_summary(cx))
             .child(
@@ -722,7 +749,7 @@ impl RoastScreen {
                     .child(
                         Button::new("next-event")
                             .outline()
-                            .label("Charge")
+                            .label(t("Charge"))
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.press(EventKind::Charge, cx);
                             })),
@@ -731,7 +758,7 @@ impl RoastScreen {
                         div()
                             .text_xs()
                             .text_color(white(0.4))
-                            .child("Next Charge is detected automatically."),
+                            .child(t("Next Charge is detected automatically.")),
                     ),
             )
     }
@@ -744,7 +771,7 @@ impl RoastScreen {
             summary_figures(st).into()
         } else {
             let [time, bt, ror, et, air, gas] = live_figures(st);
-            let air = air.sub(Some(format!("gas {} %", gas.value)));
+            let air = air.sub(Some(tf("gas {v} %", &[("v", &gas.value)])));
             vec![time, bt, ror, et, air]
         };
         div()

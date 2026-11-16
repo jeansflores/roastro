@@ -10,6 +10,7 @@ use gpui_kit::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, SharedString, Window, div,
     px,
 };
+use i18n::{t, tf};
 use roastro::engine::{Edit, Request};
 use roastro::wire::{CoffeeIn, CoffeeOut, CoffeePatch, RoastDoc, RoastQueryIn};
 use uuid::Uuid;
@@ -41,12 +42,12 @@ impl Fields {
             cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
         };
         Self {
-            name: input("Ethiopia Guji Natural", window, cx),
+            name: input(t("Ethiopia Guji Natural"), window, cx),
             lot: input("2401", window, cx),
-            origin: input("Ethiopia", window, cx),
-            process: input("Washed, natural, honey…", window, cx),
-            supplier: input("Who sold it", window, cx),
-            notes: input("How it roasts, what to watch", window, cx),
+            origin: input(t("Ethiopia"), window, cx),
+            process: input(t("Washed, natural, honey…"), window, cx),
+            supplier: input(t("Who sold it"), window, cx),
+            notes: input(t("How it roasts, what to watch"), window, cx),
         }
     }
 
@@ -111,23 +112,27 @@ impl Fields {
                     .flex()
                     .flex_wrap()
                     .gap_3()
-                    .child(field("Name", &self.name, format!("{prefix}-name")))
-                    .child(field("Lot", &self.lot, format!("{prefix}-lot"))),
+                    .child(field(t("Name"), &self.name, format!("{prefix}-name")))
+                    .child(field(t("Lot"), &self.lot, format!("{prefix}-lot"))),
             )
             .child(
                 div()
                     .flex()
                     .flex_wrap()
                     .gap_3()
-                    .child(field("Origin", &self.origin, format!("{prefix}-origin")))
-                    .child(field("Process", &self.process, format!("{prefix}-process")))
+                    .child(field(t("Origin"), &self.origin, format!("{prefix}-origin")))
                     .child(field(
-                        "Supplier",
+                        t("Process"),
+                        &self.process,
+                        format!("{prefix}-process"),
+                    ))
+                    .child(field(
+                        t("Supplier"),
                         &self.supplier,
                         format!("{prefix}-supplier"),
                     )),
             )
-            .child(field("Notes", &self.notes, format!("{prefix}-notes")))
+            .child(field(t("Notes"), &self.notes, format!("{prefix}-notes")))
     }
 }
 
@@ -185,7 +190,7 @@ impl CoffeesPage {
         };
         let body = fields.as_new(cx);
         if body.name.is_empty() {
-            self.message = Some("A coffee needs a name.".into());
+            self.message = Some(t("A coffee needs a name.").into());
             cx.notify();
             return;
         }
@@ -245,7 +250,7 @@ impl CoffeesPage {
                             .child(c.name.clone()),
                     )
                     .child(div().text_sm().text_color(white(0.5)).child(if c.archived {
-                        format!("{origin} · lot finished")
+                        tf("{origin} · lot finished", &[("origin", &origin)])
                     } else {
                         origin
                     })),
@@ -318,21 +323,21 @@ impl Render for CoffeesPage {
                         div()
                             .text_2xl()
                             .font_weight(FontWeight::BOLD)
-                            .child("Coffees"),
+                            .child(t("Coffees")),
                     )
                     .child(
                         div()
                             .text_color(white(0.5))
-                            .child(format!("{} green coffees", self.coffees.len())),
+                            .child(tf("{n} green coffees", &[("n", &self.coffees.len())])),
                     )
                     .child(div().flex_1())
                     .child(
                         Button::new("show-finished")
                             .ghost()
                             .label(if finished {
-                                "Hide finished lots"
+                                t("Hide finished lots")
                             } else {
-                                "Show finished lots"
+                                t("Show finished lots")
                             })
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.show_finished = !this.show_finished;
@@ -342,7 +347,7 @@ impl Render for CoffeesPage {
                     .child(
                         Button::new("add-coffee-open")
                             .primary()
-                            .label("Add coffee")
+                            .label(t("Add coffee"))
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.adding = Some(Fields::new(window, cx));
                                 cx.notify();
@@ -362,7 +367,11 @@ impl Render for CoffeesPage {
                     .rounded_lg()
                     .border_1()
                     .border_color(white(0.1))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child("New coffee"))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(t("New coffee")),
+                    )
                     .child(fields.form("new-coffee"))
                     .children(
                         self.message
@@ -376,16 +385,18 @@ impl Render for CoffeesPage {
                             .child(
                                 Button::new("add-coffee-save")
                                     .primary()
-                                    .label("Add coffee")
+                                    .label(t("Add coffee"))
                                     .on_click(cx.listener(|this, _, _, cx| this.add(cx))),
                             )
-                            .child(Button::new("add-coffee-cancel").label("Cancel").on_click(
-                                cx.listener(|this, _, _, cx| {
-                                    this.adding = None;
-                                    this.message = None;
-                                    cx.notify();
-                                }),
-                            )),
+                            .child(
+                                Button::new("add-coffee-cancel")
+                                    .label(t("Cancel"))
+                                    .on_click(cx.listener(|this, _, _, cx| {
+                                        this.adding = None;
+                                        this.message = None;
+                                        cx.notify();
+                                    })),
+                            ),
                     )
             }))
             .child(
@@ -395,17 +406,17 @@ impl Render for CoffeesPage {
                     .px_4()
                     .mx_2()
                     .pt_3()
-                    .child(div().flex_1().child(label("Coffee")))
-                    .child(div().w(px(80.)).child(label("Lot")))
+                    .child(div().flex_1().child(label(t("Coffee"))))
+                    .child(div().w(px(80.)).child(label(t("Lot"))))
                     .child(
                         div()
                             .flex()
                             .gap_4()
-                            .child(header("Roasts", 56.))
-                            .child(header("Last roast", 200.))
-                            .child(header("Green used", 96.))
-                            .child(header("Avg DTR", 72.))
-                            .child(header("Avg loss", 72.)),
+                            .child(header(t("Roasts"), 56.))
+                            .child(header(t("Last roast"), 200.))
+                            .child(header(t("Green used"), 96.))
+                            .child(header(t("Avg DTR"), 72.))
+                            .child(header(t("Avg loss"), 72.)),
                     ),
             )
             .child(
@@ -418,10 +429,9 @@ impl Render for CoffeesPage {
                     .pb_6()
                     .children(rows)
                     .children(empty.then(|| {
-                        div()
-                            .p_6()
-                            .text_color(white(0.45))
-                            .child("No coffees yet. Add the first one to pick it for a roast.")
+                        div().p_6().text_color(white(0.45)).child(t(
+                            "No coffees yet. Add the first one to pick it for a roast.",
+                        ))
                     })),
             )
     }
@@ -554,7 +564,10 @@ impl CoffeePage {
                     .w(px(80.))
                     .child(format!("DTR {}", percent(r.metrics.development_time_ratio))),
             )
-            .child(div().child(format!("loss {}", percent(r.metrics.weight_loss_ratio))))
+            .child(div().child(tf(
+                "loss {loss}",
+                &[("loss", &percent(r.metrics.weight_loss_ratio))],
+            )))
     }
 }
 
@@ -567,7 +580,7 @@ impl Render for CoffeePage {
                 .test_support()
                 .p_6()
                 .text_color(white(0.5))
-                .child("Loading the coffee…")
+                .child(t("Loading the coffee…"))
                 .into_any_element();
         };
         if !self.filled {
@@ -607,20 +620,20 @@ impl Render for CoffeePage {
                     )
                     .children(
                         archived
-                            .then(|| div().text_sm().text_color(white(0.5)).child("lot finished")),
+                            .then(|| div().text_sm().text_color(white(0.5)).child(t("lot finished"))),
                     )
                     .child(div().flex_1())
                     .child(
                         Button::new("coffee-roasts")
-                            .label("See all its roasts")
+                            .label(t("See all its roasts"))
                             .on_click(cx.listener(move |_, _, _, cx| cx.emit(ShowRoasts(id)))),
                     )
                     .child(
                         Button::new("coffee-archive")
                             .label(if archived {
-                                "Bring the lot back"
+                                t("Bring the lot back")
                             } else {
-                                "Lot finished"
+                                t("Lot finished")
                             })
                             .on_click(cx.listener(move |this, _, _, cx| {
                                 let patch = CoffeePatch {
@@ -630,9 +643,9 @@ impl Render for CoffeePage {
                                 this.patch(
                                     patch,
                                     if archived {
-                                        "Back in the pickers."
+                                        t("Back in the pickers.")
                                     } else {
-                                        "Hidden from the pickers; its roasts stay."
+                                        t("Hidden from the pickers; its roasts stay.")
                                     },
                                     cx,
                                 );
@@ -641,7 +654,7 @@ impl Render for CoffeePage {
                     .children((!archived).then(|| {
                         Button::new("roast-it-next")
                             .primary()
-                            .label("Roast it next")
+                            .label(t("Roast it next"))
                             .on_click(cx.listener(move |_, _, _, cx| cx.emit(RoastItNext(id))))
                     })),
             )
@@ -669,15 +682,15 @@ impl Render for CoffeePage {
                             .gap_3()
                             .child(self.fields.form("coffee"))
                             .child(div().child(
-                                Button::new("coffee-save").label("Save changes").on_click(
+                                Button::new("coffee-save").label(t("Save changes")).on_click(
                                     cx.listener(|this, _, _, cx| {
                                         let patch = this.fields.as_patch(cx);
                                         if patch.name.as_deref() == Some("") {
-                                            this.message = Some("A coffee needs a name.".into());
+                                            this.message = Some(t("A coffee needs a name.").into());
                                             cx.notify();
                                             return;
                                         }
-                                        this.patch(patch, "Saved.", cx);
+                                        this.patch(patch, t("Saved."), cx);
                                     }),
                                 ),
                             )),
@@ -687,21 +700,23 @@ impl Render for CoffeePage {
                             .flex()
                             .flex_col()
                             .gap_2()
-                            .child(label("Latest roasts"))
+                            .child(label(t("Latest roasts")))
                             .children(rows)
                             .children(none.then(|| {
                                 div()
                                     .text_sm()
                                     .text_color(white(0.45))
-                                    .child("Not roasted yet.")
+                                    .child(t("Not roasted yet."))
                             }))
                             .children(coffee.stats.as_ref().map(|s| {
-                                div().pt_2().text_sm().text_color(white(0.55)).child(format!(
-                                    "{} roasts · {} kg green · average DTR {} · average loss {}",
-                                    s.roasts,
-                                    kilograms(s.green_weight_g),
-                                    percent(s.average_development_time_ratio),
-                                    percent(s.average_weight_loss_ratio),
+                                div().pt_2().text_sm().text_color(white(0.55)).child(tf(
+                                    "{roasts} roasts · {green} kg green · average DTR {dtr} · average loss {loss}",
+                                    &[
+                                        ("roasts", &s.roasts),
+                                        ("green", &kilograms(s.green_weight_g)),
+                                        ("dtr", &percent(s.average_development_time_ratio)),
+                                        ("loss", &percent(s.average_weight_loss_ratio)),
+                                    ],
                                 ))
                             })),
                     ),

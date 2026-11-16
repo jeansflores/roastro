@@ -1668,6 +1668,7 @@ dependencies = [
  "clap",
  "dirs 7.0.0",
  "gpui-kit",
+ "i18n",
  "jiff",
  "regmap",
  "roast",
@@ -3772,6 +3773,14 @@ dependencies = [
  "tokio",
  "tower-service",
  "tracing",
+]
+
+[[package]]
+name = "i18n"
+version = "0.1.0"
+dependencies = [
+ "sys-locale",
+ "toml 1.2.1+spec-1.1.0",
 ]
 
 [[package]]
@@ -6831,6 +6840,7 @@ dependencies = [
  "axum",
  "clap",
  "dirs 7.0.0",
+ "i18n",
  "jiff",
  "pdf-writer",
  "plc",

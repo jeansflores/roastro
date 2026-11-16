@@ -6,6 +6,7 @@ mod edits;
 #[cfg(test)]
 mod scenarios;
 
+use i18n::t;
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -116,6 +117,10 @@ pub enum Edit {
     InspectBackup(PathBuf, Reply<BackupOut>),
     /// Replace everything with a backup. Refused while a roast is recording.
     RestoreBackup(PathBuf, Reply<BackupOut>),
+    /// The language chosen in the app (a BCP 47 tag), if one was.
+    Language(Reply<Option<String>>),
+    /// Remember the language chosen in the app.
+    SetLanguage(String, Reply<()>),
 }
 
 /// Why a poll brought no reading.
@@ -131,8 +136,40 @@ impl From<&plc::Error> for Failure {
     fn from(e: &plc::Error) -> Self {
         Self {
             error: e.to_string(),
-            advice: e.trouble().advice().to_owned(),
+            advice: advice(e.trouble()).to_owned(),
         }
+    }
+}
+
+/// What to check for a failed read, in plain words and the app's language.
+#[must_use]
+pub fn advice(trouble: plc::Trouble) -> &'static str {
+    match trouble {
+        plc::Trouble::BadAddress => {
+            t("The address is not valid. Write it as host:port, like 192.168.5.11:502.")
+        }
+        plc::Trouble::NoAnswer => t(
+            "The machine does not answer at this address. Check that it is on, the network cable and the address.",
+        ),
+        plc::Trouble::Slow => t("The machine stopped answering in time. Check the network."),
+        plc::Trouble::Refused => {
+            t("The machine answers but refuses the readings: the model may not match this machine.")
+        }
+        plc::Trouble::Broken => t("The connection broke. Roastro reconnects on its own."),
+    }
+}
+
+/// An event's name in the app's language.
+#[must_use]
+pub fn event_name(kind: roast::EventKind) -> &'static str {
+    use roast::EventKind as K;
+    match kind {
+        K::Charge => t("Charge"),
+        K::TurningPoint => t("Turning point"),
+        K::DryEnd => t("Dry end"),
+        K::FirstCrack => t("First crack"),
+        K::SecondCrack => t("Second crack"),
+        K::Drop => t("Drop"),
     }
 }
 
@@ -274,7 +311,7 @@ impl Engine {
                 } else {
                     Err(ApiError::conflict(
                         "no_roast_before_drop",
-                        "there is no roast between Charge and Drop",
+                        t("there is no roast between Charge and Drop"),
                     ))
                 };
                 let _ = reply.send(result);
@@ -309,7 +346,7 @@ impl Engine {
             return Ok(Target::Demo);
         }
         let url = crate::machine::normalize_address(&body.address).ok_or_else(|| {
-            ApiError::invalid("invalid_address", plc::Trouble::BadAddress.advice())
+            ApiError::invalid("invalid_address", advice(plc::Trouble::BadAddress))
         })?;
         let map = crate::machine::model_map(&body.model)
             .map_err(|e| ApiError::invalid("unknown_model", e.to_string()))?;
@@ -323,7 +360,7 @@ impl Engine {
         if self.recording.is_before_drop() {
             return Err(ApiError::conflict(
                 "roast_recording",
-                "Finish the roast before changing the machine.",
+                t("Finish the roast before changing the machine."),
             ));
         }
         let target = Self::target(body)?;
@@ -381,7 +418,7 @@ impl Engine {
         let Some(control) = &self.link_control else {
             let _ = reply.send(Err(ApiError::conflict(
                 "no_link",
-                "there is no machine connection to test with",
+                t("there is no machine connection to test with"),
             )));
             return;
         };
@@ -392,7 +429,7 @@ impl Engine {
         {
             let _ = reply.send(Err(ApiError::conflict(
                 "busy",
-                "Roastro is busy; try again",
+                t("Roastro is busy; try again"),
             )));
         }
     }
@@ -420,7 +457,7 @@ impl Engine {
         if self.recording.is_before_drop() {
             return Err(ApiError::conflict(
                 "roast_recording",
-                "Finish the roast before restoring a backup.",
+                t("Finish the roast before restoring a backup."),
             ));
         }
         let info = store::Store::inspect_backup(path).map_err(|e| Self::backup_error(&e))?;
@@ -485,7 +522,7 @@ impl Engine {
         if !sent {
             return Err(ApiError::conflict(
                 "no_link",
-                "there is no machine connection to retry",
+                t("there is no machine connection to retry"),
             ));
         }
         let mut link = self.link.clone();

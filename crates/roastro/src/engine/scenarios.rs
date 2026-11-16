@@ -209,11 +209,14 @@ fn alarms_are_noted_once_on_the_roast() {
     assert_eq!(notes[1].0, "Emergency stop");
 }
 
-/// `REPORT_OUT=/tmp/roast.pdf cargo test -p roastro write_a_report -- --ignored`
+/// `REPORT_OUT=/tmp/roast.pdf [REPORT_LANG=pt] cargo test -p roastro write_a_report -- --ignored`
 /// writes the PDF report of a simulated roast, to look at.
 #[test]
 #[ignore = "writes a file to look at"]
 fn write_a_report_to_look_at() {
+    if std::env::var("REPORT_LANG").as_deref() == Ok("pt") {
+        i18n::set(i18n::Lang::PtBr);
+    }
     let (roasts, _, mut engine) = run_engine(None, 1300);
     let roast = &roasts[0];
     let (tx, mut rx) = oneshot::channel();

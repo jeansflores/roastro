@@ -1,0 +1,18 @@
+[package]
+name = "i18n"
+version = "0.1.0"
+description = "Roastro's languages: English in the code, Portuguese (Brazil) beside it."
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+
+[features]
+# Each thread its own language: for UI tests that run side by side.
+thread-local = []
+
+[dependencies]
+sys-locale = "0.3.2"
+toml = "1.2.1"
+
+[lints]
+workspace = true

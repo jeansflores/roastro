@@ -12,6 +12,7 @@ use gpui_kit::{
     Context, Entity, FontWeight, Hsla, IntoElement, SharedString, Subscription, Window, div, px,
     rgb,
 };
+use i18n::{t, tf};
 
 use roastro::alarm::Alarm;
 use roastro::wire::LinkState;
@@ -49,11 +50,11 @@ impl Page {
 
     fn title(self) -> &'static str {
         match self {
-            Self::Live => "Live roast",
-            Self::Roasts | Self::Roast | Self::Compare => "Roasts",
-            Self::Coffees | Self::Coffee => "Coffees",
-            Self::NewRoast => "New roast",
-            Self::Machine => "Machine",
+            Self::Live => t("Live roast"),
+            Self::Roasts | Self::Roast | Self::Compare => t("Roasts"),
+            Self::Coffees | Self::Coffee => t("Coffees"),
+            Self::NewRoast => t("New roast"),
+            Self::Machine => t("Machine"),
         }
     }
 
@@ -296,14 +297,14 @@ impl Shell {
                     .text_sm()
                     .font_weight(FontWeight::BOLD)
                     .text_color(chart::bt())
-                    .child("ROASTRO"),
+                    .child(t("ROASTRO")),
             )
             .child(Self::live_card(st, cx))
             .child(
                 Button::new("nav-new")
                     .primary()
                     .icon(IconName::Plus)
-                    .label("New roast")
+                    .label(t("New roast"))
                     .on_click(cx.listener(|this, _, _, cx| this.go(Page::NewRoast, cx))),
             )
             .child(
@@ -338,6 +339,7 @@ impl Shell {
             )
             .child(div().flex_1())
             .child(Self::machine_status(st, cx))
+            .child(Self::languages(cx))
     }
 
     /// The icon rail that replaces the sidebar on Live roast.
@@ -385,7 +387,7 @@ impl Shell {
         let (title, time, line, accent): (String, String, String, Hsla) =
             if let Some(alarm) = alarms.first() {
                 (
-                    format!("Alarm · {}", alarm.name()),
+                    tf("Alarm · {name}", &[("name", &alarm.name())]),
                     st.now()
                         .filter(|_| st.recording())
                         .map_or_else(|| "–:––".into(), |at| clock(st.roast_s(at))),
@@ -395,27 +397,30 @@ impl Shell {
             } else if st.recording() {
                 let roast = st.roast.as_ref();
                 (
-                    format!("Recording · Roast #{}", roast.map_or(0, |r| r.number)),
+                    tf(
+                        "Recording · Roast #{n}",
+                        &[("n", &roast.map_or(0, |r| r.number))],
+                    ),
                     st.now()
                         .map_or_else(|| "–:––".into(), |at| clock(st.roast_s(at))),
                     roast
                         .and_then(|r| r.coffee.as_ref().map(|c| c.name.clone()))
-                        .unwrap_or_else(|| "No coffee set".into()),
+                        .unwrap_or_else(|| t("No coffee set").into()),
                     chart::bt(),
                 )
             } else if st.connected() {
                 (
-                    "Waiting for charge".into(),
+                    t("Waiting for charge").into(),
                     "–:––".into(),
-                    "Charge is detected automatically".into(),
+                    t("Charge is detected automatically").into(),
                     white(0.6),
                 )
             } else {
                 let (state, color) = link_words(st);
                 let title = if state == "Not set up" {
-                    "Set up the machine".to_owned()
+                    t("Set up the machine").to_owned()
                 } else {
-                    format!("Machine · {state}")
+                    tf("Machine · {state}", &[("state", &state)])
                 };
                 let line = st
                     .link
@@ -469,7 +474,7 @@ impl Shell {
             .as_ref()
             .map(|m| m.name.clone())
             .filter(|n| !n.is_empty())
-            .unwrap_or_else(|| "Machine".to_owned());
+            .unwrap_or_else(|| t("Machine").to_owned());
         let text = format!("{name} · {}", link_words(st).0);
         div()
             .id("machine-status")
@@ -491,6 +496,76 @@ impl Shell {
 }
 
 impl Shell {
+    /// `PT · EN` at the foot of the sidebar.
+    fn languages(cx: &mut Context<Self>) -> impl IntoElement {
+        let now = i18n::current();
+        div().flex().justify_center().gap_1().text_xs().children(
+            i18n::Lang::ALL
+                .into_iter()
+                .enumerate()
+                .flat_map(|(i, lang)| {
+                    let on = lang == now;
+                    let choice = div()
+                        .id(SharedString::from(format!("lang-{}", lang.tag())))
+                        .test_support()
+                        .px_2()
+                        .py_1()
+                        .rounded_md()
+                        .cursor_pointer()
+                        .font_weight(if on {
+                            FontWeight::BOLD
+                        } else {
+                            FontWeight::NORMAL
+                        })
+                        .text_color(if on { chart::bt() } else { white(0.5) })
+                        .hover(|d| d.text_color(white(0.9)))
+                        .on_click(cx.listener(move |this, _, _, cx| this.speak(lang, cx)))
+                        .child(lang.short())
+                        .into_any_element();
+                    let dot =
+                        (i > 0).then(|| div().text_color(white(0.3)).child("·").into_any_element());
+                    dot.into_iter().chain(std::iter::once(choice))
+                }),
+        )
+    }
+
+    /// Switches the language, remembers it, and redraws every page.
+    fn speak(&mut self, lang: i18n::Lang, cx: &mut Context<Self>) {
+        if i18n::current() == lang {
+            return;
+        }
+        i18n::set(lang);
+        let tag = lang.tag().to_owned();
+        if let Some(reply) = self
+            .engine
+            .ask(|r| roastro::engine::Request::Edit(roastro::engine::Edit::SetLanguage(tag, r)))
+        {
+            cx.background_executor()
+                .spawn(async move {
+                    let _ = reply.await;
+                })
+                .detach();
+        }
+        // Lists whose items hold text are rebuilt; every page draws again.
+        self.roasts.update(cx, RoastsPage::reload_coffees);
+        self.new_roast.update(cx, |n, cx| n.load_choices(cx));
+        self.live.update(cx, |_, cx| cx.notify());
+        self.roasts.update(cx, |_, cx| cx.notify());
+        self.coffees.update(cx, |_, cx| cx.notify());
+        self.new_roast.update(cx, |_, cx| cx.notify());
+        self.machine.update(cx, |_, cx| cx.notify());
+        if let Some(d) = &self.detail {
+            d.update(cx, |_, cx| cx.notify());
+        }
+        if let Some(c) = &self.compare {
+            c.update(cx, |_, cx| cx.notify());
+        }
+        if let Some((c, _)) = &self.coffee {
+            c.update(cx, |_, cx| cx.notify());
+        }
+        cx.notify();
+    }
+
     /// The roast being recorded, pinned above the list: one click to Live.
     fn recording_row(st: &LiveState, cx: &mut Context<Self>) -> impl IntoElement {
         let roast = st.roast.as_ref();
@@ -511,9 +586,9 @@ impl Shell {
             .cursor_pointer()
             .on_click(cx.listener(|this, _, _, cx| this.go(Page::Live, cx)))
             .child(div().size(px(8.)).rounded_full().bg(chart::bt()))
-            .child(div().font_weight(FontWeight::SEMIBOLD).child(format!(
-                "Roast #{} is recording",
-                roast.map_or(0, |r| r.number)
+            .child(div().font_weight(FontWeight::SEMIBOLD).child(tf(
+                "Roast #{n} is recording",
+                &[("n", &roast.map_or(0, |r| r.number))],
             )))
             .child(
                 div().text_color(white(0.6)).child(
@@ -526,7 +601,7 @@ impl Shell {
                 div()
                     .text_sm()
                     .text_color(chart::bt())
-                    .child("Open the live roast"),
+                    .child(t("Open the live roast")),
             )
     }
 }
@@ -553,7 +628,7 @@ fn link_error(st: &LiveState) -> String {
     st.link
         .as_ref()
         .and_then(|l| l.error.clone())
-        .unwrap_or_else(|| "Connecting…".into())
+        .unwrap_or_else(|| t("Connecting…").into())
 }
 
 impl Render for Shell {
@@ -847,7 +922,11 @@ mod tests {
         cx.simulate_new_path_selection(|_| Some(csv.clone()));
         cx.run_until_parked();
         let written = std::fs::read_to_string(&csv).expect("the CSV is saved where chosen");
-        assert!(written.starts_with("\u{feff}Roast time (s);"), "{written}");
+        // Another test may switch the language meanwhile: check the shape.
+        assert!(
+            written.starts_with('\u{feff}') && written.contains(';'),
+            "{written}"
+        );
         let _ = std::fs::remove_file(&csv);
 
         let pdf = csv.with_extension("pdf");
@@ -1275,5 +1354,39 @@ mod tests {
             );
         })
         .unwrap();
+    }
+
+    #[gpui_kit::test]
+    fn switches_the_language_and_remembers_it(cx: &mut TestAppContext) {
+        let (handle, _shell, mut rx) = open(cx);
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("rail-coffees", cx);
+            window.render_frame(cx);
+            window.click("lang-pt-BR", cx);
+            window.render_frame(cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(i18n::current(), i18n::Lang::PtBr);
+        let saved = std::iter::from_fn(|| rx.try_recv().ok()).any(
+            |req| matches!(req, Request::Edit(Edit::SetLanguage(ref tag, _)) if tag == "pt-BR"),
+        );
+        assert!(saved, "the choice is kept");
+        assert_eq!(i18n::t("Roasts"), "Torras");
+        // Every page draws in Portuguese.
+        cx.update_window(handle, |_, window, cx| {
+            for page in ["nav-roasts", "nav-coffees", "nav-machine", "nav-new"] {
+                window.click(page, cx);
+                window.render_frame(cx);
+            }
+            window.click("nav-live", cx);
+            window.render_frame(cx);
+            window.click("rail-coffees", cx);
+            window.render_frame(cx);
+            window.click("lang-en", cx);
+        })
+        .unwrap();
+        assert_eq!(i18n::current(), i18n::Lang::En);
     }
 }
