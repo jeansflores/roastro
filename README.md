@@ -6,7 +6,7 @@ Written in Rust ([ADR 0002](docs/adr/0002-rewrite-in-rust.md)).
 
 | Command | What it is |
 |---|---|
-| `crates/roastro` | The app: reads the PLC once a second, records every roast in SQLite (Charge, turning point and Drop detected automatically) and serves the API and the live stream (`ws://127.0.0.1:8000/api/live`) on this machine only. The web UI comes next. |
+| `crates/roastro` | The app: reads the PLC once a second, records every roast in SQLite (Charge, turning point and Drop detected automatically) and serves the API and the live stream (`ws://127.0.0.1:8000/api/live`) on this machine only. The native desktop UI (GPUI) comes next. |
 | `crates/sim` | Pretends to be the PLC: thermal model (drum, beans, moisture, lagging probes, gas servo) and interlocks, served over Modbus TCP, plus an HTTP panel for the "physical world" |
 | `crates/monitor` | Live terminal dashboard: roast values, link health, keyboard commands, automatic reconnection |
 | `crates/probe` | One line per reading, optional CSV, one-off writes |
