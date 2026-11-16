@@ -108,6 +108,7 @@ fn main() -> anyhow::Result<()> {
     gpui_kit::application().run(move |cx| {
         gpui_kit::init(cx);
         Theme::change(ThemeMode::Dark, None, cx);
+        view::use_accent(cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
