@@ -1,5 +1,6 @@
-# Builds and checks the Windows desktop app, and publishes the .exe as an
-# artifact. Windows builds come from CI (ADR 0003).
+# Builds and checks the Windows desktop app, and publishes the installer (and
+# the bare .exe) as artifacts. Windows builds come from CI (ADR 0003); the
+# installer is decided in #53.
 name: windows
 
 on:
@@ -29,6 +30,39 @@ jobs:
           $p = Start-Process -FilePath target\release\roastro-desktop.exe -ArgumentList '--simulator','--db',$db,'--exit-after','20' -PassThru
           if (-not $p.WaitForExit(90000)) { Stop-Process $p; throw "did not exit in 90 s" }
           if ($p.ExitCode -ne 0) { throw "exit code $($p.ExitCode)" }
+      - name: Installer
+        id: installer
+        shell: pwsh
+        run: |
+          $version = (cargo metadata --no-deps --format-version 1 | ConvertFrom-Json).packages |
+            Where-Object name -eq 'desktop' | Select-Object -ExpandProperty version
+          $version = "$version.${{ github.run_number }}"
+          choco install innosetup --no-progress -y
+          $iscc = Join-Path ${env:ProgramFiles(x86)} 'Inno Setup 6\ISCC.exe'
+          & $iscc "/DAppVersion=$version" "/DSourceExe=$PWD\target\release\roastro-desktop.exe" "/O$PWD\dist" packaging\windows\roastro.iss
+          if ($LASTEXITCODE -ne 0) { throw "iscc failed" }
+          "version=$version" >> $env:GITHUB_OUTPUT
+      - name: Install, run and uninstall (silent)
+        shell: pwsh
+        run: |
+          $setup = Get-ChildItem dist\roastro-setup-*.exe | Select-Object -First 1
+          $p = Start-Process -FilePath $setup.FullName -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES','/NORESTART' -PassThru -Wait
+          if ($p.ExitCode -ne 0) { throw "setup exit code $($p.ExitCode)" }
+          $exe = Join-Path $env:LOCALAPPDATA 'Programs\Roastro\Roastro.exe'
+          if (-not (Test-Path $exe)) { throw "not installed at $exe" }
+          $menu = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Roastro.lnk'
+          if (-not (Test-Path $menu)) { throw "no Start menu shortcut" }
+          $db = Join-Path $env:RUNNER_TEMP 'installed.db'
+          $run = Start-Process -FilePath $exe -ArgumentList '--simulator','--db',$db,'--exit-after','10' -PassThru
+          if (-not $run.WaitForExit(60000)) { Stop-Process $run; throw "installed app did not exit" }
+          if ($run.ExitCode -ne 0) { throw "installed app exit code $($run.ExitCode)" }
+          $uninstall = Join-Path $env:LOCALAPPDATA 'Programs\Roastro\unins000.exe'
+          $u = Start-Process -FilePath $uninstall -ArgumentList '/VERYSILENT','/SUPPRESSMSGBOXES' -PassThru -Wait
+          if ($u.ExitCode -ne 0) { throw "uninstall exit code $($u.ExitCode)" }
+      - uses: actions/upload-artifact@v4
+        with:
+          name: roastro-setup-${{ steps.installer.outputs.version }}
+          path: dist/roastro-setup-*.exe
       - uses: actions/upload-artifact@v4
         with:
           name: roastro-desktop-windows
