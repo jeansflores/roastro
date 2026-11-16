@@ -19,10 +19,13 @@ use gpui_kit::{
 use roast::EventKind;
 use roastro::RoastId;
 use roastro::engine::{Edit, Reply, Request};
-use roastro::wire::{Columns, EventIn, NextRoastIn, NoteIn, RoastDoc, RoastPatchIn, SampleOut};
+use roastro::wire::{
+    Columns, EventIn, NextRoastIn, NoteIn, RoastDoc, RoastPatchIn, RoastQueryIn, SampleOut,
+};
 use uuid::Uuid;
 
 use crate::chart::{self, Geometry};
+use crate::compare::CompareRoasts;
 use crate::roasts::day;
 use crate::state::{LiveState, Millis};
 use crate::view::rail::{Size, label, phases, summary_figures};
@@ -58,6 +61,7 @@ pub struct RoastDetail {
 }
 
 impl EventEmitter<Back> for RoastDetail {}
+impl EventEmitter<CompareRoasts> for RoastDetail {}
 
 /// Readings in rows, from the columns the engine sends.
 fn rows(c: &Columns) -> Vec<SampleOut> {
@@ -265,6 +269,35 @@ impl RoastDetail {
         .detach();
     }
 
+    /// Compares this roast with the previous roast of its coffee.
+    fn compare_with_previous(&mut self, cx: &mut Context<Self>) {
+        let Some(roast) = self.state.roast.as_ref() else {
+            return;
+        };
+        let id = roast.id;
+        let query = RoastQueryIn {
+            before: Some(id),
+            coffee: roast.coffee.as_ref().map(|c| c.id),
+            ..RoastQueryIn::default()
+        };
+        let Some(reply) = self.engine.ask(|r| Request::Edit(Edit::Roasts(query, r))) else {
+            return;
+        };
+        cx.spawn(async move |this, cx| {
+            let page = reply.await.ok()?.ok()?;
+            this.update(cx, |this, cx| {
+                if let Some(previous) = page.roasts.first() {
+                    cx.emit(CompareRoasts(vec![id, previous.id]));
+                } else {
+                    this.message = Some("No earlier roast of this coffee.".into());
+                    cx.notify();
+                }
+            })
+            .ok()
+        })
+        .detach();
+    }
+
     fn pointer_moved(&mut self, position: Point<Pixels>, cx: &mut Context<Self>) {
         let hover = self
             .geometry
@@ -432,6 +465,17 @@ impl RoastDetail {
             )
             .child(div().text_sm().text_color(white(0.5)).child(line))
             .child(div().flex_1())
+            .children(roast.reference.as_ref().map(|r| {
+                let pair = vec![roast.id, r.id];
+                Button::new("compare-reference")
+                    .label(format!("Compare with its reference #{}", r.number))
+                    .on_click(cx.listener(move |_, _, _, cx| cx.emit(CompareRoasts(pair.clone()))))
+            }))
+            .child(
+                Button::new("compare-previous")
+                    .label("Compare with the previous")
+                    .on_click(cx.listener(|this, _, _, cx| this.compare_with_previous(cx))),
+            )
             .child(
                 Button::new("use-as-reference")
                     .primary()
