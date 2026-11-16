@@ -675,6 +675,8 @@ mod tests {
     #[gpui_kit::test]
     fn the_next_roast_is_stored_as_it_is_filled(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
+        // No animations in tests: every frame is the final one.
+        cx.update(|cx| cx.set_reduce_motion(true));
         let (tx, mut rx) = mpsc::channel(64);
         let (handle, (live, page)) = cx.update(|cx| {
             let options = WindowOptions {

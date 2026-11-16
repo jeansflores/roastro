@@ -3,9 +3,11 @@
 //! timeline of events and notes.
 
 use gpui_kit::component::button::Button;
+use gpui_kit::{Animation, AnimationExt as _};
 use i18n::{t, tf};
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::input::{Input, InputEvent, InputState};
@@ -313,7 +315,11 @@ impl RoastScreen {
                 anchored()
                     .position(position + point(px(16.), px(16.)))
                     .snap_to_window_with_margin(px(8.))
-                    .child(card),
+                    .child(div().child(card).with_animation(
+                        "hover-in",
+                        Animation::new(Duration::from_millis(120)),
+                        Styled::opacity,
+                    )),
             )
             .into_any_element(),
         )
@@ -395,7 +401,11 @@ impl RoastScreen {
                 anchored()
                     .position(menu.position + point(px(12.), px(12.)))
                     .snap_to_window_with_margin(px(8.))
-                    .child(panel),
+                    .child(panel.with_animation(
+                        "menu-in",
+                        Animation::new(Duration::from_millis(120)),
+                        Styled::opacity,
+                    )),
             )
             .into_any_element(),
         )
@@ -875,6 +885,11 @@ impl Render for RoastScreen {
                         "No readings since {since} · reconnecting · the roast continues if they return within 5 minutes",
                         &[("since", &since)],
                     ))
+                    .with_animation(
+                        "readings-stopped-in",
+                        Animation::new(Duration::from_millis(200)),
+                        |el, d| el.opacity(d).mt(px(-8. * (1. - d))),
+                    )
             }))
             .children(self.big.then(|| self.strip()))
             .child(
@@ -951,6 +966,8 @@ mod tests {
     #[gpui_kit::test]
     fn the_next_event_button_and_notes_reach_the_engine(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
+        // No animations in tests: every frame is the final one.
+        cx.update(|cx| cx.set_reduce_motion(true));
         let (tx, mut rx) = mpsc::channel(16);
         let (handle, screen) = cx.update(|cx| {
             let options = WindowOptions {
@@ -1023,6 +1040,8 @@ mod tests {
     #[gpui_kit::test]
     fn hovering_and_clicking_the_chart(cx: &mut TestAppContext) {
         cx.update(gpui_kit::init);
+        // No animations in tests: every frame is the final one.
+        cx.update(|cx| cx.set_reduce_motion(true));
         let (tx, mut rx) = mpsc::channel(16);
         let (handle, screen) = cx.update(|cx| {
             let options = WindowOptions {
@@ -1118,6 +1137,8 @@ mod tests {
         mpsc::Receiver<Request>,
     ) {
         cx.update(gpui_kit::init);
+        // No animations in tests: every frame is the final one.
+        cx.update(|cx| cx.set_reduce_motion(true));
         let (tx, mut rx) = mpsc::channel(16);
         let (handle, screen) = cx.update(|cx| {
             let options = WindowOptions {

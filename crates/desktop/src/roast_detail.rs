@@ -6,12 +6,14 @@
 use i18n::{t, tf};
 use std::cell::Cell;
 use std::rc::Rc;
+use std::time::Duration;
 
 use gpui_kit::TestSupportExt as _;
 use gpui_kit::component::Sizable as _;
 use gpui_kit::component::button::{Button, ButtonVariants as _};
 use gpui_kit::component::input::{Input, InputEvent, InputState};
 use gpui_kit::prelude::*;
+use gpui_kit::{Animation, AnimationExt as _};
 use gpui_kit::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, IntoElement, MouseButton,
     MouseDownEvent, MouseMoveEvent, Pixels, Point, SharedString, Subscription, Window, anchored,
@@ -385,7 +387,11 @@ impl RoastDetail {
                 anchored()
                     .position(position + point(px(16.), px(16.)))
                     .snap_to_window_with_margin(px(8.))
-                    .child(card),
+                    .child(div().child(card).with_animation(
+                        "hover-in",
+                        Animation::new(Duration::from_millis(120)),
+                        Styled::opacity,
+                    )),
             )
             .into_any_element(),
         )
@@ -457,7 +463,11 @@ impl RoastDetail {
                 anchored()
                     .position(position + point(px(12.), px(12.)))
                     .snap_to_window_with_margin(px(8.))
-                    .child(panel),
+                    .child(panel.with_animation(
+                        "menu-in",
+                        Animation::new(Duration::from_millis(120)),
+                        Styled::opacity,
+                    )),
             )
             .into_any_element(),
         )
