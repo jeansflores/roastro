@@ -223,22 +223,32 @@ fn edits_fields_notes_discards_and_lists() {
         None,
         "discarded roasts are not suggested"
     );
+    let discarded_too = RoastQuery {
+        include_discarded: true,
+        ..RoastQuery::default()
+    };
     let listed: Vec<_> = st
-        .roasts(None, false, 10)
+        .roasts(&RoastQuery::default(), 10)
         .unwrap()
         .into_iter()
         .map(|r| r.id)
         .collect();
     assert_eq!(listed, [second], "discarded hidden by default");
     let all: Vec<_> = st
-        .roasts(None, true, 10)
+        .roasts(&discarded_too, 10)
         .unwrap()
         .into_iter()
         .map(|r| r.id)
         .collect();
     assert_eq!(all, [second, first], "newest first");
     let older: Vec<_> = st
-        .roasts(Some(second), true, 10)
+        .roasts(
+            &RoastQuery {
+                before: Some(second),
+                ..discarded_too.clone()
+            },
+            10,
+        )
         .unwrap()
         .into_iter()
         .map(|r| r.id)
@@ -251,4 +261,65 @@ fn edits_fields_notes_discards_and_lists() {
     assert_eq!(st.coffees(true).unwrap()[0].name, "Mundo Novo 2026");
     let (before, after) = st.sample_neighbors(first, 5).unwrap();
     assert_eq!((before, after), (None, None));
+}
+
+#[test]
+fn filters_roasts_by_coffee_charge_time_and_text() {
+    let mut st = Store::open_in_memory().unwrap();
+    let guji = st.add_coffee("Ethiopia Guji 50%").unwrap();
+    let cerrado = st.add_coffee("Brazil Cerrado").unwrap();
+    let mut roast = |at: Millis, coffee: Uuid| {
+        let id = st.start_roast(at, Source::Manual, &[]).unwrap();
+        st.update_roast(
+            id,
+            &RoastPatch {
+                coffee_id: Some(Some(coffee)),
+                ..RoastPatch::default()
+            },
+        )
+        .unwrap();
+        id
+    };
+    let first = roast(1_000, guji);
+    let second = roast(2_000, cerrado);
+    let third = roast(3_000, guji);
+    st.add_note(second, 2_500, "crash after first crack")
+        .unwrap();
+    let ids = |q: RoastQuery| -> Vec<RoastId> {
+        st.roasts(&q, 10)
+            .unwrap()
+            .into_iter()
+            .map(|r| r.id)
+            .collect()
+    };
+    let by_text = |text: &str| RoastQuery {
+        text: Some(text.into()),
+        ..RoastQuery::default()
+    };
+    assert_eq!(
+        ids(RoastQuery {
+            coffee_id: Some(guji),
+            ..RoastQuery::default()
+        }),
+        [third, first]
+    );
+    assert_eq!(
+        ids(RoastQuery {
+            since: Some(2_000),
+            until: Some(3_000),
+            ..RoastQuery::default()
+        }),
+        [second],
+        "since inclusive, until exclusive, on Charge"
+    );
+    assert_eq!(ids(by_text("CRASH")), [second], "notes, any case");
+    assert_eq!(ids(by_text("cerrado")), [second], "coffee name");
+    assert_eq!(ids(by_text("#1")), [first], "number");
+    assert_eq!(ids(by_text("50%")), [third, first], "% is literal");
+    assert_eq!(ids(by_text("5_%")), [], "_ is literal");
+    assert_eq!(
+        ids(by_text("  ")),
+        [third, second, first],
+        "blank is no filter"
+    );
 }
