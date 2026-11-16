@@ -133,6 +133,8 @@ pub enum Input {
     ChargePressed(Millis),
     /// The operator pressed Drop at this time.
     DropPressed(Millis),
+    /// The operator closed the roast without a Drop.
+    ClosePressed,
 }
 
 /// Why a roast stopped receiving samples.
@@ -144,6 +146,8 @@ pub enum Closure {
     Gap,
     /// A new Charge arrived before any Drop; the roast is Incomplete.
     NewCharge,
+    /// The operator closed it; Incomplete if it had no Drop.
+    Operator,
 }
 
 impl Closure {
@@ -290,6 +294,17 @@ impl Recorder {
                     self.drop(at, Source::Manual, &mut out);
                 }
             }
+            Input::ClosePressed => match self.phase {
+                Phase::Roasting(_) => {
+                    out.push(Output::Closed(Closure::Operator));
+                    self.phase = Phase::Waiting;
+                }
+                Phase::Tail { .. } => {
+                    out.push(Output::Closed(Closure::AfterDrop));
+                    self.phase = Phase::Waiting;
+                }
+                Phase::Waiting => {}
+            },
         }
         out
     }

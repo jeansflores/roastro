@@ -5,20 +5,24 @@
 use std::fmt::Display;
 use std::sync::Arc;
 
+use axum::extract::rejection::JsonRejection;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
-use axum::extract::{Path, Request as HttpRequest, State};
+use axum::extract::{FromRequest, Path, Query, Request as HttpRequest, State};
 use axum::http::{HeaderMap, Method, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, post};
+use axum::routing::{get, patch, post, put};
 use axum::{Json, Router};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use store::RoastId;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
-use crate::engine::{Reply, Request};
-use crate::wire::{Columns, RoastDoc};
+use crate::engine::{Edit, Reply, Request};
+use crate::wire::{
+    CoffeeIn, CoffeeOut, CoffeePatch, Columns, EventIn, NextRoastIn, NextRoastOut, NoteIn, NoteOut,
+    NotePatch, RoastDoc, RoastPage, RoastPatchIn,
+};
 
 /// An API error: an HTTP status and `{ "error": { "code", "message" } }`.
 #[derive(Debug)]
@@ -48,6 +52,24 @@ impl ApiError {
     pub fn conflict(code: &'static str, message: impl Into<String>) -> Self {
         Self {
             status: StatusCode::CONFLICT,
+            code,
+            message: message.into(),
+        }
+    }
+
+    /// 400: the request itself is malformed.
+    pub fn invalid(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::BAD_REQUEST,
+            code,
+            message: message.into(),
+        }
+    }
+
+    /// 422: well formed, but it breaks a roast rule.
+    pub fn unprocessable(code: &'static str, message: impl Into<String>) -> Self {
+        Self {
+            status: StatusCode::UNPROCESSABLE_ENTITY,
             code,
             message: message.into(),
         }
@@ -144,8 +166,25 @@ pub fn router(state: AppState) -> Router {
         .route("/api/live", get(live))
         .route("/api/charge", post(charge))
         .route("/api/drop", post(drop_now))
-        .route("/api/roasts/{id}", get(roast))
+        .route("/api/roasts", get(roasts))
+        .route("/api/roasts/{id}", get(roast).patch(patch_roast))
         .route("/api/roasts/{id}/samples", get(samples))
+        .route(
+            "/api/roasts/{id}/events/{kind}",
+            put(set_event).delete(delete_event),
+        )
+        .route("/api/roasts/{id}/notes", post(add_note))
+        .route(
+            "/api/roasts/{id}/notes/{note}",
+            patch(patch_note).delete(delete_note),
+        )
+        .route("/api/roasts/{id}/discard", post(discard))
+        .route("/api/roasts/{id}/restore", post(restore))
+        .route("/api/roasts/{id}/close", post(close))
+        .route("/api/next-roast", get(next_roast).put(put_next_roast))
+        .route("/api/coffees", get(coffees).post(add_coffee))
+        .route("/api/coffees/{id}", patch(patch_coffee))
+        .fallback(not_found)
         .layer(middleware::from_fn_with_state(state.clone(), check_origin))
         .with_state(state)
 }
@@ -183,18 +222,214 @@ async fn drop_now(State(app): State<AppState>) -> Result<Json<RoastDoc>, ApiErro
     app.ask(Request::Drop).await.map(Json)
 }
 
+/// A JSON request body whose rejections use the contract's error format.
+struct Body<T>(T);
+
+impl<S, T> FromRequest<S> for Body<T>
+where
+    Json<T>: FromRequest<S, Rejection = JsonRejection>,
+    S: Send + Sync,
+{
+    type Rejection = ApiError;
+
+    async fn from_request(req: HttpRequest, state: &S) -> Result<Self, ApiError> {
+        Json::<T>::from_request(req, state)
+            .await
+            .map(|Json(v)| Body(v))
+            .map_err(|e| ApiError::invalid("invalid_body", e.body_text()))
+    }
+}
+
+fn parse_id(s: &str, what: &str) -> Result<Uuid, ApiError> {
+    Uuid::parse_str(s)
+        .map_err(|_| ApiError::invalid("invalid_id", format!("{s:?} is not a {what} id")))
+}
+
+fn roast_id(s: &str) -> Result<RoastId, ApiError> {
+    parse_id(s, "roast").map(RoastId)
+}
+
+async fn not_found() -> ApiError {
+    ApiError::not_found("no_such_route", "no such API route")
+}
+
 async fn roast(
     State(app): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
 ) -> Result<Json<RoastDoc>, ApiError> {
-    app.ask(|r| Request::Roast(RoastId(id), r)).await.map(Json)
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Roast(id, r)).await.map(Json)
 }
 
 async fn samples(
     State(app): State<AppState>,
-    Path(id): Path<Uuid>,
+    Path(id): Path<String>,
 ) -> Result<Json<Columns>, ApiError> {
-    app.ask(|r| Request::Samples(RoastId(id), r))
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Samples(id, r)).await.map(Json)
+}
+
+#[derive(Deserialize)]
+struct ListQuery {
+    before: Option<String>,
+    include: Option<String>,
+}
+
+async fn roasts(
+    State(app): State<AppState>,
+    Query(q): Query<ListQuery>,
+) -> Result<Json<RoastPage>, ApiError> {
+    let before = q
+        .before
+        .as_deref()
+        .map(|b| parse_id(b, "roast"))
+        .transpose()?;
+    let discarded = q.include.as_deref() == Some("discarded");
+    app.ask(|r| Request::Edit(Edit::Roasts(before, discarded, r)))
+        .await
+        .map(Json)
+}
+
+async fn patch_roast(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Body(body): Body<RoastPatchIn>,
+) -> Result<Json<RoastDoc>, ApiError> {
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Edit(Edit::PatchRoast(id, body, r)))
+        .await
+        .map(Json)
+}
+
+async fn set_event(
+    State(app): State<AppState>,
+    Path((id, kind)): Path<(String, String)>,
+    Body(body): Body<EventIn>,
+) -> Result<Json<RoastDoc>, ApiError> {
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Edit(Edit::SetEvent(id, kind, body, r)))
+        .await
+        .map(Json)
+}
+
+async fn delete_event(
+    State(app): State<AppState>,
+    Path((id, kind)): Path<(String, String)>,
+) -> Result<Json<RoastDoc>, ApiError> {
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Edit(Edit::DeleteEvent(id, kind, r)))
+        .await
+        .map(Json)
+}
+
+async fn add_note(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Body(body): Body<NoteIn>,
+) -> Result<(StatusCode, Json<NoteOut>), ApiError> {
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Edit(Edit::AddNote(id, body, r)))
+        .await
+        .map(|n| (StatusCode::CREATED, Json(n)))
+}
+
+async fn patch_note(
+    State(app): State<AppState>,
+    Path((id, note)): Path<(String, String)>,
+    Body(body): Body<NotePatch>,
+) -> Result<Json<NoteOut>, ApiError> {
+    let (id, note) = (roast_id(&id)?, parse_id(&note, "note")?);
+    app.ask(|r| Request::Edit(Edit::PatchNote(id, note, body, r)))
+        .await
+        .map(Json)
+}
+
+async fn delete_note(
+    State(app): State<AppState>,
+    Path((id, note)): Path<(String, String)>,
+) -> Result<StatusCode, ApiError> {
+    let (id, note) = (roast_id(&id)?, parse_id(&note, "note")?);
+    app.ask(|r| Request::Edit(Edit::DeleteNote(id, note, r)))
+        .await
+        .map(|()| StatusCode::NO_CONTENT)
+}
+
+async fn discard(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<RoastDoc>, ApiError> {
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Edit(Edit::Discard(id, r)))
+        .await
+        .map(Json)
+}
+
+async fn restore(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<RoastDoc>, ApiError> {
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Edit(Edit::Restore(id, r)))
+        .await
+        .map(Json)
+}
+
+async fn close(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<RoastDoc>, ApiError> {
+    let id = roast_id(&id)?;
+    app.ask(|r| Request::Edit(Edit::Close(id, r)))
+        .await
+        .map(Json)
+}
+
+async fn next_roast(State(app): State<AppState>) -> Result<Json<NextRoastOut>, ApiError> {
+    app.ask(|r| Request::Edit(Edit::GetNextRoast(r)))
+        .await
+        .map(Json)
+}
+
+async fn put_next_roast(
+    State(app): State<AppState>,
+    Body(body): Body<NextRoastIn>,
+) -> Result<Json<NextRoastOut>, ApiError> {
+    app.ask(|r| Request::Edit(Edit::PutNextRoast(body, r)))
+        .await
+        .map(Json)
+}
+
+#[derive(Deserialize)]
+struct CoffeeQuery {
+    #[serde(default)]
+    archived: bool,
+}
+
+async fn coffees(
+    State(app): State<AppState>,
+    Query(q): Query<CoffeeQuery>,
+) -> Result<Json<Vec<CoffeeOut>>, ApiError> {
+    app.ask(|r| Request::Edit(Edit::Coffees(q.archived, r)))
+        .await
+        .map(Json)
+}
+
+async fn add_coffee(
+    State(app): State<AppState>,
+    Body(body): Body<CoffeeIn>,
+) -> Result<(StatusCode, Json<CoffeeOut>), ApiError> {
+    app.ask(|r| Request::Edit(Edit::AddCoffee(body, r)))
+        .await
+        .map(|c| (StatusCode::CREATED, Json(c)))
+}
+
+async fn patch_coffee(
+    State(app): State<AppState>,
+    Path(id): Path<String>,
+    Body(body): Body<CoffeePatch>,
+) -> Result<Json<CoffeeOut>, ApiError> {
+    let id = parse_id(&id, "coffee")?;
+    app.ask(|r| Request::Edit(Edit::PatchCoffee(id, body, r)))
         .await
         .map(Json)
 }

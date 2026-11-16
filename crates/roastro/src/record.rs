@@ -86,6 +86,11 @@ impl Recording {
         &self.store
     }
 
+    /// The database, for edits that do not go through the recorder.
+    pub fn store_mut(&mut self) -> &mut Store {
+        &mut self.store
+    }
+
     fn apply(&mut self, out: Output) -> anyhow::Result<()> {
         match out {
             Output::Started {

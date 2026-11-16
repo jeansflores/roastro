@@ -169,3 +169,86 @@ fn reads_coffee_names_and_notes() {
     let id = st.start_roast(0, Source::Manual, &[]).unwrap();
     assert_eq!(st.notes(id).unwrap(), []);
 }
+
+#[test]
+fn edits_fields_notes_discards_and_lists() {
+    let mut st = Store::open_in_memory().unwrap();
+    let coffee = st.add_coffee("Mundo Novo").unwrap();
+    let first = st.start_roast(0, Source::Manual, &[]).unwrap();
+    st.set_event(first, EventKind::Drop, 600_000, Source::Manual)
+        .unwrap();
+    st.update_roast(
+        first,
+        &RoastPatch {
+            coffee_id: Some(Some(coffee)),
+            roasted_weight_g: Some(Some(4300)),
+            ..RoastPatch::default()
+        },
+    )
+    .unwrap();
+    let r = st.roast(first).unwrap();
+    assert_eq!(
+        (r.coffee_id, r.roasted_weight_g),
+        (Some(coffee), Some(4300))
+    );
+    st.update_roast(
+        first,
+        &RoastPatch {
+            roasted_weight_g: Some(None),
+            ..RoastPatch::default()
+        },
+    )
+    .unwrap();
+    assert_eq!(
+        st.roast(first).unwrap().roasted_weight_g,
+        None,
+        "Some(None) clears"
+    );
+    assert_eq!(st.latest_done_roast(coffee).unwrap(), Some(first));
+
+    let note = st.add_note(first, 120_000, "smell of bread").unwrap();
+    let moved = st
+        .update_note(first, note.id, Some(130_000), None)
+        .unwrap()
+        .unwrap();
+    assert_eq!((moved.at, moved.text.as_str()), (130_000, "smell of bread"));
+    assert!(st.delete_note(first, note.id).unwrap());
+    assert!(!st.delete_note(first, note.id).unwrap());
+
+    assert!(st.delete_event(first, EventKind::Drop).unwrap());
+    let second = st.start_roast(900_000, Source::Manual, &[]).unwrap();
+    st.set_discarded(first, Some(1)).unwrap();
+    assert_eq!(
+        st.latest_done_roast(coffee).unwrap(),
+        None,
+        "discarded roasts are not suggested"
+    );
+    let listed: Vec<_> = st
+        .roasts(None, false, 10)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(listed, [second], "discarded hidden by default");
+    let all: Vec<_> = st
+        .roasts(None, true, 10)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(all, [second, first], "newest first");
+    let older: Vec<_> = st
+        .roasts(Some(second), true, 10)
+        .unwrap()
+        .into_iter()
+        .map(|r| r.id)
+        .collect();
+    assert_eq!(older, [first], "cursor");
+
+    st.update_coffee(coffee, Some("Mundo Novo 2026"), Some(true))
+        .unwrap();
+    assert_eq!(st.coffees(false).unwrap(), []);
+    assert_eq!(st.coffees(true).unwrap()[0].name, "Mundo Novo 2026");
+    let (before, after) = st.sample_neighbors(first, 5).unwrap();
+    assert_eq!((before, after), (None, None));
+}

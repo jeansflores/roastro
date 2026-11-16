@@ -2,6 +2,8 @@
 //! the PLC and requests from the API arrive on a single queue, so everything
 //! happens in one order and the live stream never contradicts the database.
 
+mod edits;
+
 use std::collections::VecDeque;
 use std::sync::Arc;
 use std::time::Duration;
@@ -15,9 +17,11 @@ use tokio::sync::{broadcast, mpsc, oneshot};
 use crate::api::ApiError;
 use crate::record::Recording;
 use crate::wire::{
-    Columns, Link, LinkState, Live, NextRoastOut, RoastDoc, RorSettings, SampleOut, Snapshot,
-    samples_with_ror,
+    CoffeeIn, CoffeeOut, CoffeePatch, Columns, EventIn, Link, LinkState, Live, NextRoastIn,
+    NextRoastOut, NoteIn, NoteOut, NotePatch, RoastDoc, RoastPage, RoastPatchIn, RorSettings,
+    SampleOut, Snapshot, samples_with_ror,
 };
+use uuid::Uuid;
 
 /// Readings kept for the live screen while waiting for Charge.
 const PRE_CHARGE: Duration = Duration::from_secs(60);
@@ -46,6 +50,42 @@ pub enum Request {
     Roast(RoastId, Reply<RoastDoc>),
     /// One roast's readings in columns.
     Samples(RoastId, Reply<Columns>),
+    /// Something a person changes: see [`Edit`].
+    Edit(Edit),
+}
+
+/// Changes people make through the API, each with its reply.
+pub enum Edit {
+    /// Mark or move an event.
+    SetEvent(RoastId, String, EventIn, Reply<RoastDoc>),
+    /// Remove a manual event.
+    DeleteEvent(RoastId, String, Reply<RoastDoc>),
+    /// Add a note.
+    AddNote(RoastId, NoteIn, Reply<NoteOut>),
+    /// Change a note.
+    PatchNote(RoastId, Uuid, NotePatch, Reply<NoteOut>),
+    /// Remove a note.
+    DeleteNote(RoastId, Uuid, Reply<()>),
+    /// Change a roast's fields.
+    PatchRoast(RoastId, RoastPatchIn, Reply<RoastDoc>),
+    /// Hide a roast.
+    Discard(RoastId, Reply<RoastDoc>),
+    /// Bring a discarded roast back.
+    Restore(RoastId, Reply<RoastDoc>),
+    /// Close the recording roast without a Drop.
+    Close(RoastId, Reply<RoastDoc>),
+    /// Read the Next roast.
+    GetNextRoast(Reply<NextRoastOut>),
+    /// Replace the Next roast.
+    PutNextRoast(NextRoastIn, Reply<NextRoastOut>),
+    /// List coffees.
+    Coffees(bool, Reply<Vec<CoffeeOut>>),
+    /// Add a coffee.
+    AddCoffee(CoffeeIn, Reply<CoffeeOut>),
+    /// Rename or archive a coffee.
+    PatchCoffee(Uuid, CoffeePatch, Reply<CoffeeOut>),
+    /// A page of roasts.
+    Roasts(Option<Uuid>, bool, Reply<RoastPage>),
 }
 
 /// The engine's state. Lives on its own thread; see [`Engine::run`].
@@ -145,6 +185,7 @@ impl Engine {
             Request::Samples(id, reply) => {
                 let _ = reply.send(self.columns(id));
             }
+            Request::Edit(edit) => self.edit(edit),
         }
     }
 
@@ -334,6 +375,7 @@ mod tests {
     use store::Store;
 
     use super::*;
+    use crate::wire::{CoffeeIn, EventIn, NextRoastIn, NoteIn, RoastPatchIn};
 
     /// A clock the tests move by hand.
     static NOW: AtomicI64 = AtomicI64::new(0);
@@ -463,6 +505,166 @@ mod tests {
         assert_eq!(
             missing.map(|_| ()).map_err(|e| e.code()),
             Err("roast_not_found")
+        );
+    }
+
+    fn edit<T>(e: &mut Engine, make: impl FnOnce(Reply<T>) -> Edit) -> Result<T, &'static str> {
+        ask(e, |r| Request::Edit(make(r))).map_err(|err| err.code())
+    }
+
+    #[test]
+    #[allow(clippy::too_many_lines)] // one scenario, read top to bottom
+    fn enforces_the_contract_rules_on_edits() {
+        let (mut e, _rx) = engine();
+        for s in 0..5 {
+            poll(&mut e, s, 120.0);
+        }
+        let id = RoastId(ask(&mut e, Request::Charge).unwrap().id);
+        for s in 5..60 {
+            poll(&mut e, s, 120.0 + f64::from(u32::try_from(s).unwrap()));
+        }
+        // A 20 s Gap, then readings again.
+        for s in 80..100 {
+            poll(&mut e, s, 200.0);
+        }
+        let set = |e: &mut Engine, kind: &str, at_s: i64| {
+            let kind = kind.to_owned();
+            edit(e, |r| {
+                Edit::SetEvent(id, kind, EventIn { at: at_s * 1000 }, r)
+            })
+            .map(|_| ())
+        };
+        assert_eq!(set(&mut e, "dry_end", 200), Err("event_in_future"));
+        assert_eq!(
+            set(&mut e, "dry_end", 70),
+            Err("event_outside_samples"),
+            "inside the Gap"
+        );
+        assert_eq!(set(&mut e, "first_crack", 30), Ok(()));
+        assert_eq!(
+            set(&mut e, "dry_end", 40),
+            Err("event_out_of_order"),
+            "after First crack"
+        );
+        assert_eq!(set(&mut e, "dry_end", 20), Ok(()));
+        assert_eq!(set(&mut e, "crack", 20), Err("unknown_event_kind"));
+        assert_eq!(
+            edit(&mut e, |r| Edit::DeleteEvent(id, "charge".into(), r)).map(|_| ()),
+            Err("event_not_deletable")
+        );
+
+        let note = edit(&mut e, |r| {
+            Edit::AddNote(
+                id,
+                NoteIn {
+                    at: 25_000,
+                    text: " gas 70 ".into(),
+                },
+                r,
+            )
+        })
+        .unwrap();
+        assert_eq!(note.text, "gas 70", "trimmed");
+        assert_eq!(
+            edit(&mut e, |r| Edit::AddNote(
+                id,
+                NoteIn {
+                    at: 25_000,
+                    text: "  ".into()
+                },
+                r
+            ))
+            .map(|_| ()),
+            Err("empty_note")
+        );
+
+        let bad_weight = RoastPatchIn {
+            green_weight_g: Some(Some(0)),
+            ..RoastPatchIn::default()
+        };
+        assert_eq!(
+            edit(&mut e, |r| Edit::PatchRoast(id, bad_weight, r)).map(|_| ()),
+            Err("invalid_weight")
+        );
+        let self_ref = RoastPatchIn {
+            reference_id: Some(Some(id.0)),
+            ..RoastPatchIn::default()
+        };
+        assert_eq!(
+            edit(&mut e, |r| Edit::PatchRoast(id, self_ref, r)).map(|_| ()),
+            Err("invalid_reference")
+        );
+        assert_eq!(
+            edit(&mut e, |r| Edit::Discard(id, r)).map(|_| ()),
+            Err("roast_recording")
+        );
+
+        // Drop may sit inside the Gap; the roast is then Done.
+        let doc = edit(&mut e, |r| {
+            Edit::SetEvent(id, "drop".into(), EventIn { at: 70_000 }, r)
+        })
+        .unwrap();
+        assert_eq!(doc.state, "done");
+        assert_eq!(
+            edit(&mut e, |r| Edit::Close(id, r)).map(|_| ()),
+            Err("roast_not_recording")
+        );
+
+        let coffee = edit(&mut e, |r| {
+            Edit::AddCoffee(
+                CoffeeIn {
+                    name: "Bourbon".into(),
+                },
+                r,
+            )
+        })
+        .unwrap();
+        let patch = RoastPatchIn {
+            coffee_id: Some(Some(coffee.id)),
+            ..RoastPatchIn::default()
+        };
+        edit(&mut e, |r| Edit::PatchRoast(id, patch, r)).unwrap();
+        let next = NextRoastIn {
+            coffee_id: Some(coffee.id),
+            green_weight_g: Some(4600),
+            roasted_by: "Lucas".into(),
+            reference_id: None,
+        };
+        let next = edit(&mut e, |r| Edit::PutNextRoast(next, r)).unwrap();
+        assert_eq!(
+            next.suggested_reference_id,
+            Some(id.0),
+            "the coffee's latest Done roast"
+        );
+
+        let page = edit(&mut e, |r| Edit::Roasts(None, false, r)).unwrap();
+        assert_eq!((page.roasts.len(), page.next_before), (1, None));
+        edit(&mut e, |r| Edit::Discard(id, r)).unwrap();
+        assert_eq!(
+            edit(&mut e, |r| Edit::Roasts(None, false, r))
+                .unwrap()
+                .roasts
+                .len(),
+            0,
+            "discarded is hidden"
+        );
+        let (snapshot, _sub) = ask(&mut e, Request::Subscribe).unwrap();
+        assert!(
+            serde_json::from_str::<serde_json::Value>(&snapshot).unwrap()["data"]["roast"]
+                .is_null(),
+            "back to waiting"
+        );
+    }
+
+    #[test]
+    fn closes_a_recording_roast_without_drop() {
+        let (mut e, _rx) = engine();
+        poll(&mut e, 0, 120.0);
+        let id = RoastId(ask(&mut e, Request::Charge).unwrap().id);
+        poll(&mut e, 1, 120.0);
+        assert_eq!(
+            edit(&mut e, |r| Edit::Close(id, r)).unwrap().state,
+            "incomplete"
         );
     }
 }
