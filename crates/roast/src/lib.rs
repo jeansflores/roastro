@@ -3,7 +3,9 @@
 //! roast clock.
 
 mod event;
+mod metrics;
 mod ror;
 
 pub use event::{EventKind, Source, UnknownName};
+pub use metrics::{Metrics, Phase, PhaseKind, metrics, ror_series};
 pub use ror::RoR;

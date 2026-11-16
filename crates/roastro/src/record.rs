@@ -4,6 +4,17 @@ use recorder::{Input, Output, Recorder, Resume, Rules};
 use roast::EventKind;
 use store::{RoastId, Store};
 
+/// What one input changed, for the live screens.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+pub struct Changes {
+    /// A roast began.
+    pub started: Option<RoastId>,
+    /// The current roast's events or state changed (start, event, close).
+    pub roast_changed: bool,
+    /// This roast stopped receiving samples.
+    pub closed: Option<RoastId>,
+}
+
 /// The recorder, the database and the roast currently receiving samples.
 pub struct Recording {
     store: Store,
@@ -42,12 +53,37 @@ impl Recording {
         })
     }
 
-    /// Feeds one input through the recorder and writes what it decides.
-    pub fn handle(&mut self, input: Input) -> anyhow::Result<()> {
+    /// Feeds one input through the recorder, writes what it decides and says
+    /// what changed.
+    pub fn handle(&mut self, input: Input) -> anyhow::Result<Changes> {
+        let mut changes = Changes::default();
         for out in self.recorder.handle(input) {
+            let started = matches!(out, Output::Started { .. });
+            if let Output::Closed(_) = out {
+                changes.closed = self.current;
+            }
+            changes.roast_changed |= !matches!(out, Output::Sample(_));
             self.apply(out)?;
+            if started {
+                changes.started = self.current;
+            }
         }
-        Ok(())
+        Ok(changes)
+    }
+
+    /// The roast receiving samples, if any.
+    pub fn current(&self) -> Option<RoastId> {
+        self.current
+    }
+
+    /// Whether a roast is between Charge and Drop.
+    pub fn is_before_drop(&self) -> bool {
+        self.recorder.is_before_drop()
+    }
+
+    /// The database.
+    pub fn store(&self) -> &Store {
+        &self.store
     }
 
     fn apply(&mut self, out: Output) -> anyhow::Result<()> {
@@ -90,12 +126,6 @@ impl Recording {
             }
         }
         Ok(())
-    }
-
-    /// The database, for reading.
-    #[cfg(test)]
-    pub fn store(&self) -> &Store {
-        &self.store
     }
 }
 

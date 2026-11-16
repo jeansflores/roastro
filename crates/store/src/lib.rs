@@ -43,7 +43,8 @@ pub enum Error {
     NoRoast(RoastId),
 }
 
-type Result<T, E = Error> = std::result::Result<T, E>;
+/// A database result.
+pub type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// A roast's id.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -128,6 +129,17 @@ pub struct Roast {
     pub reference_id: Option<RoastId>,
     /// Its events, in roast order.
     pub events: Vec<Event>,
+}
+
+/// A free-text comment on an instant of a roast.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Note {
+    /// Id.
+    pub id: Uuid,
+    /// The instant it is about.
+    pub at: Millis,
+    /// What the operator wrote.
+    pub text: String,
 }
 
 /// What the operator prepares before Charge.
@@ -483,6 +495,50 @@ impl Store {
             ],
         )?;
         Ok(())
+    }
+
+    /// A coffee's name, if it exists.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn coffee_name(&self, id: Uuid) -> Result<Option<String>> {
+        Ok(self
+            .conn
+            .query_row(
+                "SELECT name FROM coffee WHERE id = ?1",
+                [id.to_string()],
+                |r| r.get(0),
+            )
+            .optional()?)
+    }
+
+    /// A roast's notes, in roast-clock order.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn notes(&self, roast: RoastId) -> Result<Vec<Note>> {
+        let mut stmt = self
+            .conn
+            .prepare("SELECT id, at, text FROM roast_note WHERE roast_id = ?1 ORDER BY at, id")?;
+        let rows = stmt.query_map([roast.to_string()], |r| {
+            Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, Millis>(1)?,
+                r.get::<_, String>(2)?,
+            ))
+        })?;
+        let mut notes = Vec::new();
+        for row in rows {
+            let (id, at, text) = row?;
+            notes.push(Note {
+                id: parse_uuid(&id)?,
+                at,
+                text,
+            });
+        }
+        Ok(notes)
     }
 
     /// Adds a coffee and returns its id.
