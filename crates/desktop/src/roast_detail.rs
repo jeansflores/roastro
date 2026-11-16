@@ -57,6 +57,8 @@ pub struct RoastDetail {
     weight: Entity<InputState>,
     /// The stored weight is in the field.
     weight_shown: bool,
+    /// The readings as read, for exports.
+    columns: Option<Columns>,
     _subscriptions: Vec<Subscription>,
 }
 
@@ -117,6 +119,7 @@ impl RoastDetail {
             menu_note,
             weight,
             weight_shown: false,
+            columns: None,
             _subscriptions: subscriptions,
         };
         page.load(cx);
@@ -141,6 +144,7 @@ impl RoastDetail {
             };
             this.update(cx, |this, cx| {
                 this.state.samples = rows(&columns);
+                this.columns = Some(columns);
                 this.state.roast = Some(doc);
                 if let Some((rdoc, rcols)) = reference {
                     this.state.set_reference(&rdoc, &rcols);
@@ -267,6 +271,17 @@ impl RoastDetail {
             .ok()
         })
         .detach();
+    }
+
+    /// Saves the roast as CSV where the person chooses.
+    fn export_csv(&mut self, cx: &mut Context<Self>) {
+        let (Some(roast), Some(columns)) = (self.state.roast.as_ref(), self.columns.as_ref())
+        else {
+            return;
+        };
+        let csv = roastro::export::roast_csv(roast, columns, self.state.time_scale);
+        let name = roastro::export::file_name(roast, "csv");
+        save_as(csv.into_bytes(), &name, cx);
     }
 
     /// Compares this roast with the previous roast of its coffee.
@@ -475,6 +490,11 @@ impl RoastDetail {
                 Button::new("compare-previous")
                     .label("Compare with the previous")
                     .on_click(cx.listener(|this, _, _, cx| this.compare_with_previous(cx))),
+            )
+            .child(
+                Button::new("export-csv")
+                    .label("Export CSV")
+                    .on_click(cx.listener(|this, _, _, cx| this.export_csv(cx))),
             )
             .child(
                 Button::new("use-as-reference")
@@ -691,4 +711,32 @@ impl Render for RoastDetail {
             )
             .into_any_element()
     }
+}
+
+/// Asks where to save `bytes` (starting in Documents) and writes them there,
+/// saying on the page how it went.
+fn save_as(bytes: Vec<u8>, name: &str, cx: &mut Context<RoastDetail>) {
+    let dir = dirs::document_dir()
+        .or_else(dirs::home_dir)
+        .unwrap_or_default();
+    let chosen = cx.prompt_for_new_path(&dir, Some(name));
+    cx.spawn(async move |this, cx| {
+        let path = chosen.await.ok()?.ok()??;
+        let written = cx
+            .background_executor()
+            .spawn({
+                let path = path.clone();
+                async move { std::fs::write(&path, bytes) }
+            })
+            .await;
+        this.update(cx, |this, cx| {
+            this.message = Some(match written {
+                Ok(()) => format!("Saved {}", path.display()),
+                Err(err) => format!("Could not save {}: {err}", path.display()),
+            });
+            cx.notify();
+        })
+        .ok()
+    })
+    .detach();
 }

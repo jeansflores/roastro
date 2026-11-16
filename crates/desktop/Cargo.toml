@@ -17,6 +17,7 @@ ui-test = ["gpui-kit/test-support"]
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
+dirs.workspace = true
 gpui-kit.workspace = true
 jiff.workspace = true
 regmap = { path = "../regmap" }
