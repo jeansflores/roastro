@@ -184,3 +184,21 @@ fn a_drop_with_no_trace_is_closed_by_the_next_charge() {
     );
     assert!(event_s(&roasts[0], "drop").is_none());
 }
+
+#[test]
+fn alarms_are_noted_once_on_the_roast() {
+    let (roasts, _truth) = run(Some(Scenario::Alarms), 900);
+    let notes: Vec<(&str, f64)> = roasts[0]
+        .notes
+        .iter()
+        .map(|n| {
+            #[allow(clippy::cast_precision_loss)] // roast milliseconds
+            let s = (n.at - roasts[0].charge_at.unwrap()) as f64 / 1000.0;
+            (n.text.as_str(), s)
+        })
+        .collect();
+    assert_eq!(notes.len(), 2, "{notes:?}");
+    assert_eq!(notes[0].0, "Flame failure");
+    assert!((notes[0].1 - 300.0).abs() <= 2.0, "{notes:?}");
+    assert_eq!(notes[1].0, "Emergency stop");
+}

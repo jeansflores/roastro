@@ -13,6 +13,7 @@ use gpui_kit::{
     rgb,
 };
 
+use roastro::alarm::Alarm;
 use roastro::wire::LinkState;
 use uuid::Uuid;
 
@@ -97,6 +98,8 @@ pub struct Shell {
     /// The first look at the link was taken: with no machine set up, the app
     /// opens on Machine.
     looked_at_setup: bool,
+    /// Alarms on screen at the last frame: a new one rings the bell.
+    alarms_shown: Vec<Alarm>,
     /// The coffee opened last, and what keeps its events heard.
     coffee: Option<(Entity<CoffeePage>, [Subscription; 3])>,
     /// Whether a roast was recording at the last look: when that changes,
@@ -192,6 +195,7 @@ impl Shell {
             new_roast,
             machine,
             looked_at_setup: false,
+            alarms_shown: Vec::new(),
             was_recording: false,
             _subscriptions: subscriptions,
             detail_back: None,
@@ -377,38 +381,49 @@ impl Shell {
     /// the live screen.
     fn live_card(st: &LiveState, cx: &mut Context<Self>) -> impl IntoElement {
         let bt = fmt1(st.last().and_then(|s| s.values.get("bt").copied()));
-        let (title, time, line, accent): (String, String, String, Hsla) = if st.recording() {
-            let roast = st.roast.as_ref();
-            (
-                format!("Recording · Roast #{}", roast.map_or(0, |r| r.number)),
-                st.now()
-                    .map_or_else(|| "–:––".into(), |at| clock(st.roast_s(at))),
-                roast
-                    .and_then(|r| r.coffee.as_ref().map(|c| c.name.clone()))
-                    .unwrap_or_else(|| "No coffee set".into()),
-                chart::bt(),
-            )
-        } else if st.connected() {
-            (
-                "Waiting for charge".into(),
-                "–:––".into(),
-                "Charge is detected automatically".into(),
-                white(0.6),
-            )
-        } else {
-            let (state, color) = link_words(st);
-            let title = if state == "Not set up" {
-                "Set up the machine".to_owned()
+        let alarms = active_alarms(st);
+        let (title, time, line, accent): (String, String, String, Hsla) =
+            if let Some(alarm) = alarms.first() {
+                (
+                    format!("Alarm · {}", alarm.name()),
+                    st.now()
+                        .filter(|_| st.recording())
+                        .map_or_else(|| "–:––".into(), |at| clock(st.roast_s(at))),
+                    alarm.advice().to_owned(),
+                    rgb(0x00f8_7171).into(),
+                )
+            } else if st.recording() {
+                let roast = st.roast.as_ref();
+                (
+                    format!("Recording · Roast #{}", roast.map_or(0, |r| r.number)),
+                    st.now()
+                        .map_or_else(|| "–:––".into(), |at| clock(st.roast_s(at))),
+                    roast
+                        .and_then(|r| r.coffee.as_ref().map(|c| c.name.clone()))
+                        .unwrap_or_else(|| "No coffee set".into()),
+                    chart::bt(),
+                )
+            } else if st.connected() {
+                (
+                    "Waiting for charge".into(),
+                    "–:––".into(),
+                    "Charge is detected automatically".into(),
+                    white(0.6),
+                )
             } else {
-                format!("Machine · {state}")
+                let (state, color) = link_words(st);
+                let title = if state == "Not set up" {
+                    "Set up the machine".to_owned()
+                } else {
+                    format!("Machine · {state}")
+                };
+                let line = st
+                    .link
+                    .as_ref()
+                    .and_then(|l| l.advice.clone())
+                    .unwrap_or_else(|| link_error(st));
+                (title, "–:––".into(), line, color)
             };
-            let line = st
-                .link
-                .as_ref()
-                .and_then(|l| l.advice.clone())
-                .unwrap_or_else(|| link_error(st));
-            (title, "–:––".into(), line, color)
-        };
         div()
             .id("live-card")
             .test_support()
@@ -516,6 +531,16 @@ impl Shell {
     }
 }
 
+/// The machine's alarms in the latest reading, while it answers.
+fn active_alarms(st: &LiveState) -> Vec<Alarm> {
+    if !st.connected() {
+        return Vec::new();
+    }
+    st.last()
+        .map(|s| Alarm::active(|p| s.values.get(p).copied()).collect())
+        .unwrap_or_default()
+}
+
 fn link_color(st: &LiveState) -> Hsla {
     if st.connected() {
         chart::ror()
@@ -532,8 +557,14 @@ fn link_error(st: &LiveState) -> String {
 }
 
 impl Render for Shell {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let st = self.live.read(cx).state.clone();
+        let alarms = active_alarms(&st);
+        // One bell when an alarm starts, whatever page is open.
+        if alarms.iter().any(|a| !self.alarms_shown.contains(a)) {
+            window.play_system_bell();
+        }
+        self.alarms_shown.clone_from(&alarms);
         let page = match self.page {
             Page::Live => self.live.clone().into_any_element(),
             Page::Roasts => div()
@@ -571,7 +602,33 @@ impl Render for Shell {
             .bg(rgb(0x000b_0c0e))
             .text_color(white(0.92))
             .child(nav)
-            .child(div().flex_1().min_w_0().h_full().child(page))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .h_full()
+                    .flex()
+                    .flex_col()
+                    .children(alarms.iter().map(|alarm| {
+                        div()
+                            .id(SharedString::from(format!("alarm-{}", alarm.point())))
+                            .test_support()
+                            .flex_none()
+                            .flex()
+                            .gap_2()
+                            .px_5()
+                            .py_2()
+                            .bg(rgb(0x00b9_1c1c))
+                            .text_color(white(0.98))
+                            .child(
+                                div()
+                                    .font_weight(FontWeight::BOLD)
+                                    .child(format!("{}:", alarm.name())),
+                            )
+                            .child(alarm.advice())
+                    }))
+                    .child(div().flex_1().min_h_0().child(page)),
+            )
     }
 }
 
@@ -1157,5 +1214,54 @@ mod tests {
         .unwrap();
         cx.run_until_parked();
         assert_eq!(serve(&mut rx), ["restore /media/pen/roastro.db"]);
+    }
+
+    #[gpui_kit::test]
+    fn an_alarm_shows_on_every_page_until_it_clears(cx: &mut TestAppContext) {
+        use std::collections::HashMap;
+
+        use roastro::wire::{LinkState, Live, SampleOut};
+
+        let (handle, shell, _rx) = open(cx);
+        let live = cx.update(|cx| shell.read(cx).live.clone());
+        let reading = |flame: f64| {
+            Live::Sample(SampleOut {
+                at: 2_000_000,
+                values: HashMap::from([
+                    ("bt".to_owned(), 180.0),
+                    ("flame_fault".to_owned(), flame),
+                ]),
+                ror: None,
+            })
+        };
+        cx.update(|cx| {
+            live.update(cx, |s, cx| {
+                s.apply(&snapshot(LinkState::Connected, None), cx);
+                s.apply(&reading(1.0), cx);
+            });
+        });
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("alarm-flame_fault").is_some(),
+                "on the live roast"
+            );
+            window.click("rail-coffees", cx);
+            window.render_frame(cx);
+            assert!(
+                window.try_find("alarm-flame_fault").is_some(),
+                "and on any other page"
+            );
+        })
+        .unwrap();
+        cx.update(|cx| live.update(cx, |s, cx| s.apply(&reading(0.0), cx)));
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            assert!(
+                window.try_find("alarm-flame_fault").is_none(),
+                "gone when it clears"
+            );
+        })
+        .unwrap();
     }
 }
