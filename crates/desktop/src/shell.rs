@@ -772,6 +772,18 @@ mod tests {
         cx.run_until_parked();
         assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Roast);
 
+        let csv = std::env::temp_dir().join(format!("roastro-ui-{}.csv", Uuid::now_v7()));
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("export-csv", cx);
+        })
+        .unwrap();
+        cx.simulate_new_path_selection(|_| Some(csv.clone()));
+        cx.run_until_parked();
+        let written = std::fs::read_to_string(&csv).expect("the CSV is saved where chosen");
+        assert!(written.starts_with("\u{feff}Roast time (s);"), "{written}");
+        let _ = std::fs::remove_file(&csv);
+
         cx.update_window(handle, |_, window, cx| {
             window.render_frame(cx);
             window.click("use-as-reference", cx);

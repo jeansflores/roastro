@@ -7,6 +7,7 @@
 
 pub mod api;
 pub mod engine;
+pub mod export;
 pub mod machine;
 mod record;
 // The wire types mirror the JSON contract field for field; it is documented

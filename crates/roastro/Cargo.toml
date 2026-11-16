@@ -11,6 +11,7 @@ anyhow.workspace = true
 axum = { workspace = true, features = ["ws"] }
 clap.workspace = true
 dirs.workspace = true
+jiff.workspace = true
 plc = { path = "../plc" }
 recorder = { path = "../recorder" }
 regmap = { path = "../regmap" }

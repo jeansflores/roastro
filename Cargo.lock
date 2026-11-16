@@ -1666,6 +1666,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs 7.0.0",
  "gpui-kit",
  "jiff",
  "regmap",
@@ -6818,6 +6819,7 @@ dependencies = [
  "axum",
  "clap",
  "dirs 7.0.0",
+ "jiff",
  "plc",
  "recorder",
  "regmap",
