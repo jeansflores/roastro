@@ -284,6 +284,32 @@ impl RoastDetail {
         save_as(csv.into_bytes(), &name, cx);
     }
 
+    /// Saves the roast's report as PDF where the person chooses.
+    fn export_pdf(&mut self, cx: &mut Context<Self>) {
+        let (Some(roast), Some(columns)) = (self.state.roast.as_ref(), self.columns.as_ref())
+        else {
+            return;
+        };
+        let points: Vec<(f64, Option<f64>)> = self
+            .state
+            .reference
+            .as_ref()
+            .map(|r| r.points.iter().map(|p| (p.0, p.1)).collect())
+            .unwrap_or_default();
+        let reference = roast
+            .reference
+            .as_ref()
+            .filter(|_| !points.is_empty())
+            .map(|r| roastro::report::ReferenceCurve {
+                number: r.number,
+                points: &points,
+            });
+        let pdf =
+            roastro::report::roast_pdf(roast, columns, reference.as_ref(), self.state.time_scale);
+        let name = roastro::export::file_name(roast, "pdf");
+        save_as(pdf, &name, cx);
+    }
+
     /// Compares this roast with the previous roast of its coffee.
     fn compare_with_previous(&mut self, cx: &mut Context<Self>) {
         let Some(roast) = self.state.roast.as_ref() else {
@@ -490,6 +516,11 @@ impl RoastDetail {
                 Button::new("compare-previous")
                     .label("Compare with the previous")
                     .on_click(cx.listener(|this, _, _, cx| this.compare_with_previous(cx))),
+            )
+            .child(
+                Button::new("export-pdf")
+                    .label("Export PDF")
+                    .on_click(cx.listener(|this, _, _, cx| this.export_pdf(cx))),
             )
             .child(
                 Button::new("export-csv")
