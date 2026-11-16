@@ -12,13 +12,14 @@ path = "src/main.rs"
 
 [features]
 # Headless UI tests: cargo test -p desktop --features ui-test
-ui-test = ["gpui-kit/test-support"]
+ui-test = ["gpui-kit/test-support", "i18n/thread-local"]
 
 [dependencies]
 anyhow.workspace = true
 clap.workspace = true
 dirs.workspace = true
 gpui-kit.workspace = true
+i18n = { path = "../i18n" }
 jiff.workspace = true
 regmap = { path = "../regmap" }
 roast = { path = "../roast" }

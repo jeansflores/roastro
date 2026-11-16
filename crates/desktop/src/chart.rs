@@ -8,6 +8,7 @@ use gpui_kit::{
     App, Bounds, Hsla, IntoElement, PathBuilder, Pixels, Point, SharedString, Styled, TextAlign,
     TextRun, Window, canvas, fill, point, px, rgb, size,
 };
+use i18n::t;
 use roast::EventKind;
 
 use std::cell::Cell;
@@ -177,12 +178,12 @@ pub fn chart(
 /// Human label of an event, for the chart and the timeline.
 pub fn label(kind: EventKind) -> &'static str {
     match kind {
-        EventKind::Charge => "Charge",
-        EventKind::TurningPoint => "Turning point",
-        EventKind::DryEnd => "Dry end",
-        EventKind::FirstCrack => "First crack",
-        EventKind::SecondCrack => "Second crack",
-        EventKind::Drop => "Drop",
+        EventKind::Charge => t("Charge"),
+        EventKind::TurningPoint => t("Turning point"),
+        EventKind::DryEnd => t("Dry end"),
+        EventKind::FirstCrack => t("First crack"),
+        EventKind::SecondCrack => t("Second crack"),
+        EventKind::Drop => t("Drop"),
     }
 }
 
@@ -315,7 +316,7 @@ fn paint(
     text(
         window,
         cx,
-        "gas · air %",
+        i18n::t("gas · air %"),
         point(bounds.left() + px(8.), strip.top()),
         label_color,
     );

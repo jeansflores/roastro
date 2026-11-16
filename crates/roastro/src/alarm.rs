@@ -2,6 +2,8 @@
 //! any other, by name, 1 when active. Roastro only tells and records them:
 //! the PLC and the flame controller shut the gas on their own.
 
+use i18n::t;
+
 /// An alarm the machine can raise.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Alarm {
@@ -31,9 +33,9 @@ impl Alarm {
     #[must_use]
     pub fn name(self) -> &'static str {
         match self {
-            Self::Emergency => "Emergency stop",
-            Self::FlameFailure => "Flame failure",
-            Self::SafetyLimit => "Safety limit",
+            Self::Emergency => t("Emergency stop"),
+            Self::FlameFailure => t("Flame failure"),
+            Self::SafetyLimit => t("Safety limit"),
         }
     }
 
@@ -41,15 +43,15 @@ impl Alarm {
     #[must_use]
     pub fn advice(self) -> &'static str {
         match self {
-            Self::Emergency => {
-                "The machine is stopped. Release the emergency button on the machine when it is safe."
-            }
+            Self::Emergency => t(
+                "The machine is stopped. Release the emergency button on the machine when it is safe.",
+            ),
             Self::FlameFailure => {
-                "The burner is off. Check the flame before relighting on the machine's panel."
+                t("The burner is off. Check the flame before relighting on the machine's panel.")
             }
-            Self::SafetyLimit => {
-                "A temperature passed the machine's limit and the burner is off. Let it cool before going on."
-            }
+            Self::SafetyLimit => t(
+                "A temperature passed the machine's limit and the burner is off. Let it cool before going on.",
+            ),
         }
     }
 

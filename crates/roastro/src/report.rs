@@ -11,6 +11,7 @@
     clippy::many_single_char_names
 )]
 
+use i18n::{t, tf};
 use pdf_writer::{Content, Finish as _, Name, Pdf, Rect, Ref, Str};
 use recorder::Millis;
 
@@ -185,7 +186,7 @@ pub fn roast_pdf(
         MARGIN,
         y,
         INK,
-        &format!("Roast #{}", roast.number),
+        &tf("Roast #{n}", &[("n", &roast.number)]),
     );
     if let Some(at) = roast.charge_at {
         let when = jiff::Timestamp::from_millisecond(at)
@@ -202,20 +203,23 @@ pub fn roast_pdf(
         (Some(g), Some(r)) => {
             format!("{:.3} → {:.3} kg", g as f64 / 1000.0, r as f64 / 1000.0).replace('→', "->")
         }
-        (Some(g), None) => format!("{:.3} kg green", g as f64 / 1000.0),
+        (Some(g), None) => tf(
+            "{kg} kg green",
+            &[("kg", &format!("{:.3}", g as f64 / 1000.0))],
+        ),
         _ => String::new(),
     };
     let line = [
         roast
             .coffee
             .as_ref()
-            .map_or_else(|| "No coffee set".to_owned(), |c| c.name.clone()),
+            .map_or_else(|| t("No coffee set").to_owned(), |c| c.name.clone()),
         roast.roasted_by.clone(),
         weights,
         roast
             .reference
             .as_ref()
-            .map(|r| format!("reference Roast #{}", r.number))
+            .map(|r| tf("reference Roast #{n}", &[("n", &r.number)]))
             .unwrap_or_default(),
     ]
     .into_iter()
@@ -248,11 +252,18 @@ pub fn roast_pdf(
         let (a, b) = (x(roast_s(p.from)), x(roast_s(p.to)));
         first.fill(a, cy0, (b - a).max(0.0), cy1 - cy0, tint(color));
     }
-    let mut t = 50.0;
-    while t <= 250.0 {
-        first.line(&[(cx0, y_t(t)), (cx1, y_t(t))], GRID, 0.5, None);
-        first.text(SANS, 7.0, MARGIN, y_t(t) - 2.0, MUTED, &format!("{t:.0}°"));
-        t += 50.0;
+    let mut temp = 50.0;
+    while temp <= 250.0 {
+        first.line(&[(cx0, y_t(temp)), (cx1, y_t(temp))], GRID, 0.5, None);
+        first.text(
+            SANS,
+            7.0,
+            MARGIN,
+            y_t(temp) - 2.0,
+            MUTED,
+            &format!("{temp:.0}°"),
+        );
+        temp += 50.0;
     }
     for r in [0.0, 10.0, 20.0, 30.0] {
         first.text(SANS, 7.0, cx1 + 4.0, y_r(r) - 2.0, ROR, &format!("{r:.0}"));
@@ -321,22 +332,23 @@ pub fn roast_pdf(
             "dry_end" => "DE",
             "first_crack" => "FC",
             "second_crack" => "SC",
-            other => other,
+            other => other.parse().map_or(other, crate::engine::event_name),
         };
-        first.text(
-            SANS,
-            7.0,
-            x(s) + 2.0,
-            cy1 - 8.0,
-            INK,
-            &format!("{name} {}", clock(s)),
-        );
+        let mark = format!("{name} {}", clock(s));
+        // Near the right edge the label goes to the left of its line.
+        let width = mark.chars().count() as f32 * 3.6;
+        let lx = if x(s) + 2.0 + width > cx1 {
+            x(s) - 2.0 - width
+        } else {
+            x(s) + 2.0
+        };
+        first.text(SANS, 7.0, lx, cy1 - 8.0, INK, &mark);
     }
     // Legend.
     let legend_y = cy0 - 24.0;
     let mut lx = cx0;
-    let mut legend = vec![("BT", BT), ("ET", ET), ("RoR (right axis)", ROR)];
-    let reference_label = reference.map(|r| format!("Roast #{} (reference)", r.number));
+    let mut legend = vec![("BT", BT), ("ET", ET), (t("RoR (right axis)"), ROR)];
+    let reference_label = reference.map(|r| tf("Roast #{n} (reference)", &[("n", &r.number)]));
     if let Some(label) = &reference_label {
         legend.push((label.as_str(), MUTED));
     }
@@ -355,13 +367,13 @@ pub fn roast_pdf(
     let mut y = legend_y - 30.0;
     let summary = roast.summary.as_ref();
     let figures = [
-        ("Total time", drop.map_or_else(|| "—".to_owned(), clock)),
+        (t("Total time"), drop.map_or_else(|| "—".to_owned(), clock)),
         (
-            "First crack",
+            t("First crack"),
             first_crack.map_or_else(|| "—".to_owned(), clock),
         ),
         (
-            "Development",
+            t("Development"),
             drop.zip(first_crack)
                 .map_or_else(|| "—".to_owned(), |(d, f)| clock(d - f)),
         ),
@@ -373,22 +385,22 @@ pub fn roast_pdf(
                 .map_or_else(|| "—".to_owned(), |d| format!("{:.1}%", d * 100.0)),
         ),
         (
-            "Drop BT",
+            t("Drop BT"),
             format!("{}°", one(summary.and_then(|s| s.drop_bt))),
         ),
         (
-            "Weight loss",
+            t("Weight loss"),
             roast
                 .metrics
                 .weight_loss_ratio
                 .map_or_else(|| "—".to_owned(), |l| format!("{:.1}%", l * 100.0)),
         ),
-        ("RoR fall", one(summary.and_then(|s| s.ror_fall))),
+        (t("RoR fall"), one(summary.and_then(|s| s.ror_fall))),
     ];
     let col = (w - 2.0 * MARGIN) / figures.len() as f32;
     for (i, (label, value)) in figures.iter().enumerate() {
         let fx = MARGIN + col * i as f32;
-        first.text(SANS, 7.5, fx, y + 14.0, MUTED, &label.to_uppercase());
+        first.text(SANS, 6.5, fx, y + 14.0, MUTED, &label.to_uppercase());
         first.text(BOLD, 13.0, fx, y, INK, value);
     }
 
@@ -403,8 +415,11 @@ pub fn roast_pdf(
         .phases
         .iter()
         .map(|p| {
-            let mut name = p.kind.to_owned();
-            name[..1].make_ascii_uppercase();
+            let name = match p.kind {
+                "drying" => t("Drying"),
+                "maillard" => t("Maillard"),
+                _ => t("Development"),
+            };
             format!(
                 "{name} {} ({:.0}%)",
                 clock(roast_s(p.to) - roast_s(p.from)),
@@ -412,7 +427,7 @@ pub fn roast_pdf(
             )
         })
         .collect();
-    first.text(BOLD, 9.0, MARGIN, y, INK, "PHASES");
+    first.text(BOLD, 9.0, MARGIN, y, INK, &t("Phases").to_uppercase());
     first.text(SANS, 10.0, MARGIN + 60.0, y, INK, &phases.join("   ·   "));
     if total > 0.0 {
         y -= 4.0;
@@ -421,7 +436,7 @@ pub fn roast_pdf(
     // Events and notes, side by side.
     y -= 24.0;
     let top = y;
-    first.text(BOLD, 9.0, MARGIN, y, INK, "EVENTS");
+    first.text(BOLD, 9.0, MARGIN, y, INK, &t("Events").to_uppercase());
     for e in &roast.events {
         y -= 13.0;
         let at = roast_s(e.at);
@@ -430,7 +445,10 @@ pub fn roast_pdf(
             .iter()
             .position(|&t| t >= e.at)
             .and_then(|i| bt.and_then(|c| c[i]));
-        let name = e.kind.replace('_', " ");
+        let name = e.kind.parse().map_or_else(
+            |_| e.kind.replace('_', " "),
+            |k| crate::engine::event_name(k).to_owned(),
+        );
         first.text(MONO, 9.0, MARGIN, y, INK, &format!("{:>6}", clock(at)));
         first.text(SANS, 9.5, MARGIN + 44.0, y, INK, &name);
         first.text(
@@ -441,14 +459,20 @@ pub fn roast_pdf(
             BT,
             &format!("{}°", one(bt_then)),
         );
-        first.text(SANS, 8.0, MARGIN + 190.0, y, MUTED, e.source);
+        let source = match e.source {
+            "auto" => t("auto"),
+            "manual" => t("manual"),
+            "computed" => t("computed"),
+            other => other,
+        };
+        first.text(SANS, 8.0, MARGIN + 190.0, y, MUTED, source);
     }
     let nx = w / 2.0;
     let mut ny = top;
-    first.text(BOLD, 9.0, nx, ny, INK, "NOTES");
+    first.text(BOLD, 9.0, nx, ny, INK, &t("Notes").to_uppercase());
     if roast.notes.is_empty() {
         ny -= 13.0;
-        first.text(SANS, 9.5, nx, ny, MUTED, "No notes.");
+        first.text(SANS, 9.5, nx, ny, MUTED, t("No notes."));
     }
     for n in &roast.notes {
         for (i, line) in wrap(&n.text, 52).into_iter().enumerate() {
@@ -504,7 +528,7 @@ pub fn roast_pdf(
             MARGIN,
             y,
             INK,
-            &format!("Roast #{}: readings every 30 s", roast.number),
+            &tf("Roast #{n}: readings every 30 s", &[("n", &roast.number)]),
         );
         y -= 22.0;
         sheet.text(
@@ -513,7 +537,16 @@ pub fn roast_pdf(
             MARGIN,
             y,
             MUTED,
-            "   Time       BT       ET      RoR     Gas     Air    Drum",
+            &format!(
+                "{:>7}  {:>7}  {:>7}  {:>7}  {:>6}  {:>6}  {:>6}",
+                t("Time"),
+                "BT",
+                "ET",
+                "RoR",
+                t("Gas"),
+                t("Air"),
+                t("Drum")
+            ),
         );
         for row in chunk {
             y -= 12.5;

@@ -13,6 +13,7 @@ use gpui_kit::{
     Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement, SharedString, Subscription,
     Window, div, px, rgb,
 };
+use i18n::{t, tf};
 use roast::EventKind;
 use roastro::engine::{Edit, Request};
 use roastro::wire::{CoffeeOut, RoastDoc, RoastQueryIn};
@@ -52,9 +53,9 @@ impl Range {
 
     fn label(self) -> &'static str {
         match self {
-            Self::Week => "Last 7 days",
-            Self::Month => "Last 30 days",
-            Self::All => "All time",
+            Self::Week => t("Last 7 days"),
+            Self::Month => t("Last 30 days"),
+            Self::All => t("All time"),
         }
     }
 }
@@ -88,8 +89,9 @@ impl RoastsPage {
         cx: &mut Context<Self>,
     ) -> Self {
         let coffee = cx.new(|cx| SelectState::new(Vec::<Choice>::new(), None, window, cx));
-        let search =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Search a number, coffee or note"));
+        let search = cx.new(|cx| {
+            InputState::new(window, cx).placeholder(t("Search a number, coffee or note"))
+        });
         let subscriptions = vec![
             cx.subscribe_in(
                 &coffee,
@@ -138,6 +140,12 @@ impl RoastsPage {
 
     /// Lists from the newest again, as the filters say. Called when a filter
     /// changes and when a roast finishes.
+    /// Reads the coffees again (their picker's \"All coffees\" is in the
+    /// app's language).
+    pub fn reload_coffees(&mut self, cx: &mut Context<Self>) {
+        self.load_coffees(cx);
+    }
+
     /// Lists one coffee's roasts, from its page.
     pub fn show_coffee(&mut self, coffee: Uuid, cx: &mut Context<Self>) {
         self.coffee_id = Some(coffee);
@@ -296,17 +304,20 @@ impl RoastsPage {
                             .child(
                                 div()
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(format!("Roast #{}", r.number)),
+                                    .child(tf("Roast #{n}", &[("n", &r.number)])),
                             )
                             .children((r.state == "incomplete").then(|| {
-                                div().text_xs().text_color(white(0.45)).child("incomplete")
+                                div()
+                                    .text_xs()
+                                    .text_color(white(0.45))
+                                    .child(t("incomplete"))
                             })),
                     )
                     .child(
                         div().text_sm().text_color(white(0.55)).child(
                             r.coffee
                                 .as_ref()
-                                .map_or_else(|| "No coffee set".to_owned(), |c| c.name.clone()),
+                                .map_or_else(|| t("No coffee set").to_owned(), |c| c.name.clone()),
                         ),
                     ),
             )
@@ -340,7 +351,7 @@ impl RoastsPage {
         };
         let mut choices = vec![Choice {
             value: None,
-            title: "All coffees".into(),
+            title: t("All coffees").into(),
         }];
         choices.extend(coffees.into_iter().map(|c| Choice {
             value: Some(c.id),
@@ -428,13 +439,13 @@ impl Render for RoastsPage {
                         div()
                             .text_2xl()
                             .font_weight(FontWeight::BOLD)
-                            .child("Roasts"),
+                            .child(t("Roasts")),
                     )
                     .child(
                         Button::new("compare-picked")
                             .label(match self.picked.len() {
-                                0 | 1 => "Tick 2–5 roasts to compare".to_owned(),
-                                n => format!("Compare {n} roasts"),
+                                0 | 1 => t("Tick 2–5 roasts to compare").to_owned(),
+                                n => tf("Compare {n} roasts", &[("n", &n)]),
                             })
                             .disabled(self.picked.len() < 2)
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -444,7 +455,7 @@ impl Render for RoastsPage {
                     .child(
                         div()
                             .w(px(260.))
-                            .child(Select::new(&self.coffee).placeholder("All coffees")),
+                            .child(Select::new(&self.coffee).placeholder(t("All coffees"))),
                     )
                     .children([Range::Week, Range::Month, Range::All].map(|range| {
                         let on = self.range == range;
@@ -488,12 +499,12 @@ impl Render for RoastsPage {
                         div()
                             .flex()
                             .gap_4()
-                            .child(header("Total", 52.))
+                            .child(header(t("Total"), 52.))
                             .child(header("FC", 52.))
                             .child(header("DTR", 60.))
-                            .child(header("Drop BT", 64.))
-                            .child(header("Loss", 56.))
-                            .child(header("RoR fall", 64.)),
+                            .child(header(t("Drop BT"), 64.))
+                            .child(header(t("Loss"), 56.))
+                            .child(header(t("RoR fall"), 64.)),
                     ),
             )
             .child(
@@ -506,15 +517,14 @@ impl Render for RoastsPage {
                     .pb_6()
                     .children(list)
                     .children(empty.then(|| {
-                        div()
-                            .p_6()
-                            .text_color(white(0.45))
-                            .child("No roasts match. Change the coffee, the dates or the search.")
+                        div().p_6().text_color(white(0.45)).child(t(
+                            "No roasts match. Change the coffee, the dates or the search.",
+                        ))
                     }))
                     .children(self.next_before.map(|_| {
                         div().p_4().child(
                             Button::new("more-roasts")
-                                .label("Older roasts")
+                                .label(t("Older roasts"))
                                 .on_click(cx.listener(|this, _, _, cx| this.more(cx))),
                         )
                     })),

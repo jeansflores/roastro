@@ -3,6 +3,7 @@
 //! phases, events and notes; the roasted weight. Clicking the chart moves an
 //! event to that instant or notes it. Nothing here compares several roasts.
 
+use i18n::{t, tf};
 use std::cell::Cell;
 use std::rc::Rc;
 
@@ -90,7 +91,7 @@ impl RoastDetail {
         cx: &mut Context<Self>,
     ) -> Self {
         let menu_note =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Note at this instant"));
+            cx.new(|cx| InputState::new(window, cx).placeholder(t("Note at this instant")));
         let weight = cx.new(|cx| InputState::new(window, cx).placeholder("0.000"));
         let subscriptions = vec![
             cx.subscribe_in(
@@ -160,7 +161,7 @@ impl RoastDetail {
     fn edit<T: 'static>(&mut self, make: impl FnOnce(Reply<T>) -> Request, cx: &mut Context<Self>) {
         self.message = None;
         let Some(reply) = self.engine.ask(make) else {
-            self.message = Some("Roastro is busy; try again".into());
+            self.message = Some(t("Roastro is busy; try again").into());
             cx.notify();
             return;
         };
@@ -228,7 +229,7 @@ impl RoastDetail {
     fn save_weight(&mut self, cx: &mut Context<Self>) {
         let text = self.weight.read(cx).value().to_string();
         let Some(grams) = grams(&text) else {
-            self.message = Some("roasted weight: kilograms, like 4.250".into());
+            self.message = Some(t("roasted weight: kilograms, like 4.250").into());
             cx.notify();
             return;
         };
@@ -263,7 +264,7 @@ impl RoastDetail {
                 .ok()?;
             this.update(cx, |this, cx| {
                 this.message = Some(match result {
-                    Ok(_) => "The next roast will follow this one.".into(),
+                    Ok(_) => t("The next roast will follow this one.").into(),
                     Err(err) => err.to_string(),
                 });
                 cx.notify();
@@ -330,7 +331,7 @@ impl RoastDetail {
                 if let Some(previous) = page.roasts.first() {
                     cx.emit(CompareRoasts(vec![id, previous.id]));
                 } else {
-                    this.message = Some("No earlier roast of this coffee.".into());
+                    this.message = Some(t("No earlier roast of this coffee.").into());
                     cx.notify();
                 }
             })
@@ -397,10 +398,13 @@ impl RoastDetail {
         let buttons = MOVABLE.map(|kind| {
             let was = st
                 .event_at(kind)
-                .map(|t| format!("   was {}", clock_signed(st.roast_s(t))))
+                .map(|at| tf("   was {time}", &[("time", &clock_signed(st.roast_s(at)))]))
                 .unwrap_or_default();
             Button::new(SharedString::from(format!("move-{}", kind.as_str())))
-                .label(format!("{} here{was}", chart::label(kind)))
+                .label(tf(
+                    "{event} here{was}",
+                    &[("event", &chart::label(kind)), ("was", &was)],
+                ))
                 .w_full()
                 .on_click(cx.listener(move |this, _, _, cx| this.move_event(kind, at, cx)))
         });
@@ -440,9 +444,13 @@ impl RoastDetail {
                     .flex()
                     .gap_2()
                     .child(Input::new(&self.menu_note).id("detail-note").flex_1())
-                    .child(Button::new("detail-add-note").label("Add note").on_click(
-                        cx.listener(|this, _, window, cx| this.note_at_menu(window, cx)),
-                    )),
+                    .child(
+                        Button::new("detail-add-note")
+                            .label(t("Add note"))
+                            .on_click(
+                                cx.listener(|this, _, window, cx| this.note_at_menu(window, cx)),
+                            ),
+                    ),
             );
         Some(
             deferred(
@@ -458,7 +466,7 @@ impl RoastDetail {
     fn header(roast: &RoastDoc, cx: &mut Context<Self>) -> impl IntoElement {
         let weights = match (roast.green_weight_g, roast.roasted_weight_g) {
             (Some(g), Some(r)) => format!("{} → {} kg", kilograms(g), kilograms(r)),
-            (Some(g), None) => format!("{} kg green", kilograms(g)),
+            (Some(g), None) => tf("{kg} kg green", &[("kg", &kilograms(g))]),
             _ => String::new(),
         };
         let line = [
@@ -468,7 +476,7 @@ impl RoastDetail {
             roast
                 .reference
                 .as_ref()
-                .map(|r| format!("reference #{}", r.number))
+                .map(|r| tf("reference #{n}", &[("n", &r.number)]))
                 .unwrap_or_default(),
         ]
         .into_iter()
@@ -487,21 +495,21 @@ impl RoastDetail {
             .child(
                 Button::new("back")
                     .ghost()
-                    .label("← Roasts")
+                    .label(t("← Roasts"))
                     .on_click(cx.listener(|_, _, _, cx| cx.emit(Back))),
             )
             .child(
                 div()
                     .text_2xl()
                     .font_weight(FontWeight::BOLD)
-                    .child(format!("Roast #{}", roast.number)),
+                    .child(tf("Roast #{n}", &[("n", &roast.number)])),
             )
             .child(
                 div().text_color(white(0.85)).child(
                     roast
                         .coffee
                         .as_ref()
-                        .map_or_else(|| "No coffee set".to_owned(), |c| c.name.clone()),
+                        .map_or_else(|| t("No coffee set").to_owned(), |c| c.name.clone()),
                 ),
             )
             .child(div().text_sm().text_color(white(0.5)).child(line))
@@ -509,28 +517,28 @@ impl RoastDetail {
             .children(roast.reference.as_ref().map(|r| {
                 let pair = vec![roast.id, r.id];
                 Button::new("compare-reference")
-                    .label(format!("Compare with its reference #{}", r.number))
+                    .label(tf("Compare with its reference #{n}", &[("n", &r.number)]))
                     .on_click(cx.listener(move |_, _, _, cx| cx.emit(CompareRoasts(pair.clone()))))
             }))
             .child(
                 Button::new("compare-previous")
-                    .label("Compare with the previous")
+                    .label(t("Compare with the previous"))
                     .on_click(cx.listener(|this, _, _, cx| this.compare_with_previous(cx))),
             )
             .child(
                 Button::new("export-pdf")
-                    .label("Export PDF")
+                    .label(t("Export PDF"))
                     .on_click(cx.listener(|this, _, _, cx| this.export_pdf(cx))),
             )
             .child(
                 Button::new("export-csv")
-                    .label("Export CSV")
+                    .label(t("Export CSV"))
                     .on_click(cx.listener(|this, _, _, cx| this.export_csv(cx))),
             )
             .child(
                 Button::new("use-as-reference")
                     .primary()
-                    .label("Use as reference for the next roast")
+                    .label(t("Use as reference for the next roast"))
                     .on_click(cx.listener(|this, _, _, cx| this.use_as_reference(cx))),
             )
     }
@@ -565,7 +573,7 @@ impl RoastDetail {
                     div()
                         .text_xs()
                         .text_color(white(0.3))
-                        .child(e.source.to_uppercase()),
+                        .child(crate::view::rail::source_name(e.source).to_uppercase()),
                 )
                 .child(div().flex_1())
                 .children(kind.filter(|k| k.is_manual_only()).map(|kind| {
@@ -580,13 +588,13 @@ impl RoastDetail {
             .flex()
             .flex_col()
             .gap_2()
-            .child(label("Events"))
+            .child(label(t("Events")))
             .children(rows)
             .child(
                 div()
                     .text_xs()
                     .text_color(white(0.35))
-                    .child("Click the chart to move an event or add a note."),
+                    .child(t("Click the chart to move an event or add a note.")),
             )
     }
 
@@ -597,7 +605,7 @@ impl RoastDetail {
             .flex()
             .flex_col()
             .gap_2()
-            .child(label("Notes"))
+            .child(label(t("Notes")))
             .children(notes.enumerate().map(|(i, n)| {
                 let id = n.id;
                 div()
@@ -620,7 +628,7 @@ impl RoastDetail {
                             .on_click(cx.listener(move |this, _, _, cx| this.remove_note(id, cx))),
                     )
             }))
-            .child(label("Roasted weight (kg)"))
+            .child(label(t("Roasted weight (kg)")))
             .child(
                 div()
                     .flex()
@@ -629,7 +637,7 @@ impl RoastDetail {
                     .child(Input::new(&self.weight).id("detail-weight").w(px(120.)))
                     .child(
                         Button::new("detail-save-weight")
-                            .label("Save")
+                            .label(t("Save"))
                             .on_click(cx.listener(|this, _, _, cx| this.save_weight(cx))),
                     ),
             )
@@ -646,7 +654,7 @@ impl Render for RoastDetail {
                 .test_support()
                 .p_6()
                 .text_color(white(0.5))
-                .child("Loading the roast…")
+                .child(t("Loading the roast…"))
                 .into_any_element();
         };
         let hover = if self.menu.is_none() {
@@ -762,8 +770,11 @@ fn save_as(bytes: Vec<u8>, name: &str, cx: &mut Context<RoastDetail>) {
             .await;
         this.update(cx, |this, cx| {
             this.message = Some(match written {
-                Ok(()) => format!("Saved {}", path.display()),
-                Err(err) => format!("Could not save {}: {err}", path.display()),
+                Ok(()) => tf("Saved {path}", &[("path", &path.display())]),
+                Err(err) => tf(
+                    "Could not save {path}: {err}",
+                    &[("path", &path.display()), ("err", &err)],
+                ),
             });
             cx.notify();
         })

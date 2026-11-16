@@ -13,6 +13,7 @@ use gpui_kit::{
     AnyElement, Context, Entity, EventEmitter, FontWeight, Hsla, IntoElement, PathPromptOptions,
     SharedString, Subscription, Window, div, px, rgb,
 };
+use i18n::{t, tf};
 use roastro::engine::{Edit, Request};
 use roastro::machine::{CALORATTO, MODELS};
 use std::path::PathBuf;
@@ -48,14 +49,14 @@ impl SelectItem for ModelChoice {
 /// How a reading is called on screen, and its unit.
 fn reading_name(point: &str) -> (&str, &'static str) {
     match point {
-        "bt" => ("Bean temp · BT", "°C"),
-        "et" => ("Air temp · ET", "°C"),
-        "gas_cmd" => ("Gas, set", "%"),
-        "gas_fb" => ("Gas", "%"),
-        "drum" => ("Drum", "%"),
-        "fan" => ("Air (fan)", "%"),
-        "roast_point" => ("Roast point", "°C"),
-        "timer_s" => ("Timer", "s"),
+        "bt" => (t("Bean temp · BT"), "°C"),
+        "et" => (t("Air temp · ET"), "°C"),
+        "gas_cmd" => (t("Gas, set"), "%"),
+        "gas_fb" => (t("Gas"), "%"),
+        "drum" => (t("Drum"), "%"),
+        "fan" => (t("Air (fan)"), "%"),
+        "roast_point" => (t("Roast point"), "°C"),
+        "timer_s" => (t("Timer"), "s"),
         other => (other, ""),
     }
 }
@@ -64,18 +65,18 @@ fn reading_name(point: &str) -> (&str, &'static str) {
 pub fn link_words(st: &LiveState) -> (String, Hsla) {
     let red: Hsla = rgb(0x00f8_7171).into();
     let Some(link) = &st.link else {
-        return ("Starting…".into(), white(0.6));
+        return (t("Starting…").into(), white(0.6));
     };
     match link.state {
-        LinkState::NotSetUp => ("Not set up".into(), white(0.6)),
-        LinkState::Connecting => ("Connecting…".into(), white(0.6)),
-        LinkState::Connected => ("Connected".into(), chart::ror()),
+        LinkState::NotSetUp => (t("Not set up").into(), white(0.6)),
+        LinkState::Connecting => (t("Connecting…").into(), white(0.6)),
+        LinkState::Connected => (t("Connected").into(), chart::ror()),
         LinkState::Down => {
             let retry = link
                 .retry_at
                 .map(|at| (at - roastro::now_ms()).max(0) / 1000)
-                .map_or_else(String::new, |s| format!(" · retrying in {s} s"));
-            (format!("Offline{retry}"), red)
+                .map_or_else(String::new, |s| tf(" · retrying in {s} s", &[("s", &s)]));
+            (format!("{}{retry}", t("Offline")), red)
         }
     }
 }
@@ -143,7 +144,7 @@ impl MachinePage {
             engine,
             live,
             editing: false,
-            name: cx.new(|cx| InputState::new(window, cx).placeholder("Caloratto")),
+            name: cx.new(|cx| InputState::new(window, cx).placeholder(t("Caloratto"))),
             address: cx.new(|cx| InputState::new(window, cx).placeholder("192.168.5.11:502")),
             model,
             model_id: CALORATTO,
@@ -223,7 +224,7 @@ impl MachinePage {
                     Ok(machine) => {
                         this.editing = false;
                         this.test = None;
-                        this.message = Some(format!("Reading {} now.", machine.name));
+                        this.message = Some(tf("Reading {name} now.", &[("name", &machine.name)]));
                     }
                     Err(err) => this.message = Some(message_of(&err)),
                 }
@@ -253,7 +254,10 @@ impl MachinePage {
             let result = reply.await.ok()?;
             this.update(cx, |this, cx| {
                 let text = match result {
-                    Ok(b) => format!("Backed up {} roasts to {}", b.roasts, path.display()),
+                    Ok(b) => tf(
+                        "Backed up {n} roasts to {path}",
+                        &[("n", &b.roasts), ("path", &path.display())],
+                    ),
                     Err(err) => message_of(&err),
                 };
                 this.say(text, cx);
@@ -269,7 +273,7 @@ impl MachinePage {
             files: true,
             directories: false,
             multiple: false,
-            prompt: Some("Restore".into()),
+            prompt: Some(t("Restore").into()),
         });
         let engine = self.engine.clone();
         cx.spawn(async move |this, cx| {
@@ -302,7 +306,7 @@ impl MachinePage {
             let result = reply.await.ok()?;
             this.update(cx, |this, cx| match result {
                 Ok(b) => {
-                    this.say(format!("Restored: {} roasts.", b.roasts), cx);
+                    this.say(tf("Restored: {n} roasts.", &[("n", &b.roasts)]), cx);
                     this.load_drops(cx);
                     cx.emit(Restored);
                 }
@@ -317,7 +321,7 @@ impl MachinePage {
         let confirm = self.pending_restore.as_ref().map(|(path, info)| {
             let last = info
                 .last_charge_at
-                .map_or_else(String::new, |at| format!(", the last on {}", day(at)));
+                .map_or_else(String::new, |at| tf(", the last on {day}", &[("day", &day(at))]));
             div()
                 .id("restore-confirm")
                 .test_support()
@@ -328,14 +332,17 @@ impl MachinePage {
                 .rounded_md()
                 .border_1()
                 .border_color(rgb(0x00f8_7171))
-                .child(div().text_sm().child(format!(
-                    "{} holds {} roasts{last} and {} coffees.",
-                    path.display(),
-                    info.roasts,
-                    info.coffees
+                .child(div().text_sm().child(tf(
+                    "{path} holds {roasts} roasts{last} and {coffees} coffees.",
+                    &[
+                        ("path", &path.display()),
+                        ("roasts", &info.roasts),
+                        ("last", &last),
+                        ("coffees", &info.coffees),
+                    ],
                 )))
                 .child(div().text_sm().text_color(white(0.8)).child(
-                    "Restoring replaces everything on this laptop: roasts, coffees and the machine settings. Back up first if unsure.",
+                    t("Restoring replaces everything on this laptop: roasts, coffees and the machine settings. Back up first if unsure."),
                 ))
                 .child(
                     div()
@@ -344,11 +351,11 @@ impl MachinePage {
                         .child(
                             Button::new("confirm-restore")
                                 .danger()
-                                .label("Replace everything with this backup")
+                                .label(t("Replace everything with this backup"))
                                 .disabled(recording)
                                 .on_click(cx.listener(|this, _, _, cx| this.restore(cx))),
                         )
-                        .child(Button::new("cancel-restore").label("Cancel").on_click(
+                        .child(Button::new("cancel-restore").label(t("Cancel")).on_click(
                             cx.listener(|this, _, _, cx| {
                                 this.pending_restore = None;
                                 cx.notify();
@@ -360,12 +367,12 @@ impl MachinePage {
             .flex()
             .flex_col()
             .gap_2()
-            .child(label("Backup"))
+            .child(label(t("Backup")))
             .child(
                 div()
                     .text_sm()
                     .text_color(white(0.55))
-                    .child("A copy of every roast, coffee and setting, saved where you choose: a pen drive or a synced folder."),
+                    .child(t("A copy of every roast, coffee and setting, saved where you choose: a pen drive or a synced folder.")),
             )
             .child(
                 div()
@@ -373,12 +380,12 @@ impl MachinePage {
                     .gap_2()
                     .child(
                         Button::new("back-up")
-                            .label("Back up")
+                            .label(t("Back up"))
                             .on_click(cx.listener(|this, _, _, cx| this.back_up(cx))),
                     )
                     .child(
                         Button::new("restore")
-                            .label("Restore…")
+                            .label(t("Restore…"))
                             .disabled(recording)
                             .on_click(cx.listener(|this, _, _, cx| this.choose_backup(cx))),
                     ),
@@ -387,7 +394,7 @@ impl MachinePage {
                 div()
                     .text_xs()
                     .text_color(white(0.45))
-                    .child("Restoring waits for the roast to finish.")
+                    .child(t("Restoring waits for the roast to finish."))
             }))
             .children(confirm)
     }
@@ -463,7 +470,7 @@ impl MachinePage {
                 div()
                     .text_sm()
                     .text_color(white(0.6))
-                    .child("Reading the machine…")
+                    .child(t("Reading the machine…"))
                     .into_any_element(),
             ),
             None => None,
@@ -483,9 +490,9 @@ impl MachinePage {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(div().text_sm().text_color(chart::ror()).child(format!(
-                        "It answers ({} ms). Readings now:",
-                        test.latency_ms
+                    .child(div().text_sm().text_color(chart::ror()).child(tf(
+                        "It answers ({ms} ms). Readings now:",
+                        &[("ms", &test.latency_ms)],
                     )))
                     .child(readings(test.values.iter().map(|(k, v)| (k.as_str(), *v))))
                     .into_any_element(),
@@ -502,15 +509,15 @@ impl MachinePage {
             .border_1()
             .border_color(white(0.1))
             .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(if set_up {
-                "Change the machine"
+                t("Change the machine")
             } else {
-                "Set up the machine"
+                t("Set up the machine")
             }))
             .child(
                 div()
                     .text_sm()
                     .text_color(white(0.55))
-                    .child("Type the address shown on the machine's network settings. Roastro only reads it."),
+                    .child(t("Type the address shown on the machine's network settings. Roastro only reads it.")),
             )
             .child(
                 div()
@@ -518,7 +525,7 @@ impl MachinePage {
                     .gap_2()
                     .child(
                         Button::new("kind-machine")
-                            .label("A machine on the network")
+                            .label(t("A machine on the network"))
                             .when(!demo, ButtonVariants::primary)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.demo = false;
@@ -528,7 +535,7 @@ impl MachinePage {
                     )
                     .child(
                         Button::new("kind-demo")
-                            .label("Demo (built-in simulator)")
+                            .label(t("Demo (built-in simulator)"))
                             .when(demo, ButtonVariants::primary)
                             .on_click(cx.listener(|this, _, _, cx| {
                                 this.demo = true;
@@ -543,32 +550,32 @@ impl MachinePage {
                     .flex_wrap()
                     .gap_3()
                     .child(field(
-                        "Name",
+                        t("Name"),
                         Input::new(&self.name).id("machine-name").into_any_element(),
                     ))
                     .child(field(
-                        "Address",
+                        t("Address"),
                         Input::new(&self.address)
                             .id("machine-address")
                             .into_any_element(),
                     ))
                     .child(field(
-                        "Model",
-                        Select::new(&self.model).placeholder("Choose the model").into_any_element(),
+                        t("Model"),
+                        Select::new(&self.model).placeholder(t("Choose the model")).into_any_element(),
                     ))
             }))
             .children(demo.then(|| {
                 div()
                     .text_sm()
                     .text_color(white(0.55))
-                    .child("The Demo machine roasts on its own, for training and showing the app. Its roasts stay out of the real history.")
+                    .child(t("The Demo machine roasts on its own, for training and showing the app. Its roasts stay out of the real history."))
             }))
             .children(test)
             .children(recording.then(|| {
                 div()
                     .text_sm()
                     .text_color(chart::bt())
-                    .child("A roast is recording: finish it before changing the machine.")
+                    .child(t("A roast is recording: finish it before changing the machine."))
             }))
             .child(
                 div()
@@ -576,19 +583,19 @@ impl MachinePage {
                     .gap_2()
                     .child(
                         Button::new("test-machine")
-                            .label("Test connection")
+                            .label(t("Test connection"))
                             .disabled(self.testing)
                             .on_click(cx.listener(|this, _, _, cx| this.run_test(cx))),
                     )
                     .child(
                         Button::new("save-machine")
                             .primary()
-                            .label("Save and connect")
+                            .label(t("Save and connect"))
                             .disabled(recording)
                             .on_click(cx.listener(|this, _, _, cx| this.save(cx))),
                     )
                     .children(set_up.then(|| {
-                        Button::new("cancel-machine").label("Cancel").on_click(cx.listener(
+                        Button::new("cancel-machine").label(t("Cancel")).on_click(cx.listener(
                             |this, _, _, cx| {
                                 this.editing = false;
                                 this.test = None;
@@ -686,7 +693,7 @@ impl Render for MachinePage {
                     .flex()
                     .items_center()
                     .gap_3()
-                    .child(div().text_2xl().font_weight(FontWeight::BOLD).child("Machine"))
+                    .child(div().text_2xl().font_weight(FontWeight::BOLD).child(t("Machine")))
                     .child(
                         div()
                             .id("link-state")
@@ -731,7 +738,7 @@ impl Render for MachinePage {
                                     .gap_1()
                                     .child(div().text_lg().font_weight(FontWeight::SEMIBOLD).child(m.name))
                                     .child(div().text_sm().text_color(white(0.6)).child(if m.demo {
-                                        "Built-in simulator".to_owned()
+                                        t("Built-in simulator").to_owned()
                                     } else {
                                         format!("{} · Modbus TCP", m.address)
                                     }))
@@ -756,12 +763,12 @@ impl Render for MachinePage {
                                     .children(down.then(|| {
                                         Button::new("retry-now")
                                             .primary()
-                                            .label("Retry now")
+                                            .label(t("Retry now"))
                                             .on_click(cx.listener(|this, _, _, cx| this.retry(cx)))
                                     }))
                                     .child(
                                         Button::new("edit-machine")
-                                            .label("Edit")
+                                            .label(t("Edit"))
                                             .disabled(recording)
                                             .on_click(cx.listener(|this, _, window, cx| {
                                                 this.edit(window, cx);
@@ -773,7 +780,7 @@ impl Render for MachinePage {
                                     .pt_2()
                                     .text_xs()
                                     .text_color(white(0.4))
-                                    .child("Roastro only reads the machine. Gas, air and drum are set on its own panel."),
+                                    .child(t("Roastro only reads the machine. Gas, air and drum are set on its own panel.")),
                             ),
                     )
                     .child(
@@ -791,10 +798,10 @@ impl Render for MachinePage {
                                 div()
                                     .flex()
                                     .justify_between()
-                                    .child(label("Now"))
+                                    .child(label(t("Now")))
                                     .children(recording.then(|| {
                                         Button::new("machine-open-live")
-                                            .label("Open the live roast")
+                                            .label(t("Open the live roast"))
                                             .on_click(cx.listener(|_, _, _, cx| cx.emit(GoLive)))
                                     })),
                             )
@@ -802,7 +809,7 @@ impl Render for MachinePage {
                                 div()
                                     .text_sm()
                                     .text_color(white(0.45))
-                                    .child("No readings while the machine does not answer.")
+                                    .child(t("No readings while the machine does not answer."))
                                     .into_any_element()
                             } else {
                                 readings(values.iter().map(|(k, v)| (k.as_str(), *v))).into_any_element()
@@ -815,17 +822,17 @@ impl Render for MachinePage {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(label("Link drops"))
+                    .child(label(t("Link drops")))
                     .children(drops.iter().map(|d| {
                         #[allow(clippy::cast_precision_loss)] // seconds of a day
                         let lasted = d
                             .ended_at
-                            .map_or_else(|| "still down".to_owned(), |end| {
-                                format!("lasted {}", clock((end - d.started_at) as f64 / 1000.0))
+                            .map_or_else(|| t("still down").to_owned(), |end| {
+                                tf("lasted {time}", &[("time", &clock((end - d.started_at) as f64 / 1000.0))])
                             });
                         let roast = d
                             .roast_number
-                            .map_or_else(String::new, |n| format!(" · during Roast #{n}"));
+                            .map_or_else(String::new, |n| tf(" · during Roast #{n}", &[("n", &n)]));
                         div()
                             .flex()
                             .gap_4()
@@ -838,7 +845,7 @@ impl Render for MachinePage {
                         div()
                             .text_sm()
                             .text_color(white(0.45))
-                            .child("No drops: the machine answered every time.")
+                            .child(t("No drops: the machine answered every time."))
                     })),
             )
     }
