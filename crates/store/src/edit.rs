@@ -45,6 +45,19 @@ pub struct Coffee {
     pub archived: bool,
 }
 
+/// A stretch when the machine stopped answering after having answered.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LinkDrop {
+    /// When readings stopped.
+    pub started_at: Millis,
+    /// When they came back; `None` while still down.
+    pub ended_at: Option<Millis>,
+    /// The first error.
+    pub error: String,
+    /// The roast being recorded then, if any.
+    pub roast: Option<RoastId>,
+}
+
 /// What changes on a coffee: only the fields given.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CoffeeChange {
@@ -499,6 +512,74 @@ impl Store {
         let mut out = Vec::new();
         for id in ids {
             out.push(self.roast(RoastId(parse_uuid(&id?)?))?);
+        }
+        Ok(out)
+    }
+
+    /// Notes that the machine stopped answering; returns the drop to end later.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn begin_link_drop(
+        &mut self,
+        at: Millis,
+        error: &str,
+        roast: Option<RoastId>,
+    ) -> Result<i64> {
+        self.conn.execute(
+            "INSERT INTO link_drop (machine_id, started_at, error, roast_id) VALUES (?1, ?2, ?3, ?4)",
+            params![
+                self.machine_id.to_string(),
+                at,
+                error,
+                roast.map(|r| r.to_string())
+            ],
+        )?;
+        Ok(self.conn.last_insert_rowid())
+    }
+
+    /// Notes that the machine answers again.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn end_link_drop(&mut self, drop: i64, at: Millis) -> Result<()> {
+        self.conn.execute(
+            "UPDATE link_drop SET ended_at = ?1 WHERE id = ?2 AND ended_at IS NULL",
+            params![at, drop],
+        )?;
+        Ok(())
+    }
+
+    /// The latest drops on this machine, newest first.
+    ///
+    /// # Errors
+    ///
+    /// Fails on a database error.
+    pub fn link_drops(&self, limit: usize) -> Result<Vec<LinkDrop>> {
+        let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let mut stmt = self.conn.prepare(
+            "SELECT started_at, ended_at, error, roast_id FROM link_drop
+             WHERE machine_id = ?1 ORDER BY started_at DESC LIMIT ?2",
+        )?;
+        let rows = stmt.query_map(params![self.machine_id.to_string(), limit], |r| {
+            Ok((
+                r.get::<_, Millis>(0)?,
+                r.get::<_, Option<Millis>>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<String>>(3)?,
+            ))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (started_at, ended_at, error, roast) = row?;
+            out.push(LinkDrop {
+                started_at,
+                ended_at,
+                error,
+                roast: roast.map(|r| parse_uuid(&r).map(RoastId)).transpose()?,
+            });
         }
         Ok(out)
     }

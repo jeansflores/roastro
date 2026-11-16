@@ -70,6 +70,58 @@ impl Error {
     fn breaks_connection(&self) -> bool {
         !matches!(self, Error::Exception { .. })
     }
+
+    /// What this failure most likely means for the person at the machine.
+    #[must_use]
+    pub fn trouble(&self) -> Trouble {
+        match self {
+            Error::InvalidUrl(_) => Trouble::BadAddress,
+            Error::Connect { .. } => Trouble::NoAnswer,
+            Error::Timeout { .. } => Trouble::Slow,
+            Error::Exception { .. }
+            | Error::ShortResponse { .. }
+            | Error::UnknownPoint(_)
+            | Error::NotWritable(_)
+            | Error::WriteBlocked => Trouble::Refused,
+            Error::Transport { .. } => Trouble::Broken,
+        }
+    }
+}
+
+/// A failed read, as the roaster would understand it ("Machine setup and
+/// connection lifecycle", #34).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Trouble {
+    /// The address is not `host:port`.
+    BadAddress,
+    /// Nothing answers at the address.
+    NoAnswer,
+    /// Something answers, too slowly.
+    Slow,
+    /// The machine answers but refuses the readings.
+    Refused,
+    /// The connection broke.
+    Broken,
+}
+
+impl Trouble {
+    /// What to check, in plain words.
+    #[must_use]
+    pub fn advice(self) -> &'static str {
+        match self {
+            Trouble::BadAddress => {
+                "The address is not valid. Write it as host:port, like 192.168.5.11:502."
+            }
+            Trouble::NoAnswer => {
+                "The machine does not answer at this address. Check that it is on, the network cable and the address."
+            }
+            Trouble::Slow => "The machine stopped answering in time. Check the network.",
+            Trouble::Refused => {
+                "The machine answers but refuses the readings: the model may not match this machine."
+            }
+            Trouble::Broken => "The connection broke. Roastro reconnects on its own.",
+        }
+    }
 }
 
 /// How to reach the PLC.
@@ -372,6 +424,34 @@ pub fn is_loopback(url: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn says_what_a_failure_means() {
+        let refused = io::Error::from(io::ErrorKind::ConnectionRefused);
+        let cases = [
+            (Error::InvalidUrl("x".into()), Trouble::BadAddress),
+            (
+                Error::Connect {
+                    target: "192.168.5.11:502".into(),
+                    source: refused,
+                },
+                Trouble::NoAnswer,
+            ),
+            (Error::Timeout { op: "read".into() }, Trouble::Slow),
+            (
+                Error::Exception {
+                    op: "read".into(),
+                    code: ExceptionCode::IllegalDataAddress,
+                },
+                Trouble::Refused,
+            ),
+            (Error::ShortResponse { op: "read".into() }, Trouble::Refused),
+        ];
+        for (error, trouble) in cases {
+            assert_eq!(error.trouble(), trouble, "{error}");
+            assert!(trouble.advice().len() > 20, "advice for {trouble:?}");
+        }
+    }
 
     #[test]
     fn parses_urls() {

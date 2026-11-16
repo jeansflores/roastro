@@ -65,9 +65,13 @@ pub struct SampleOut {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LinkState {
+    /// No machine is set up yet.
+    NotSetUp,
+    /// Dialling, before the first answer or after Retry now.
+    Connecting,
     /// Readings arrive.
     Connected,
-    /// Reads fail.
+    /// Reads fail; retrying on its own.
     Down,
 }
 
@@ -82,6 +86,19 @@ pub struct Link {
     pub error: Option<String>,
     /// When the next attempt happens, while down.
     pub retry_at: Option<Millis>,
+    /// What to check, in plain words, while down.
+    pub advice: Option<String>,
+}
+
+/// A stretch when the machine stopped answering after having answered.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct LinkDropOut {
+    pub started_at: Millis,
+    /// `null` while still down.
+    pub ended_at: Option<Millis>,
+    pub error: String,
+    /// The roast being recorded then, if any.
+    pub roast_number: Option<i64>,
 }
 
 /// The Next roast.

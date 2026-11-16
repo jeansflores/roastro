@@ -7,6 +7,6 @@
 mod client;
 mod poller;
 
-pub use client::{Client, Config, Error, Reading, is_loopback};
+pub use client::{Client, Config, Error, Reading, Trouble, is_loopback};
 pub use poller::{Event, Poller, Reader, backoff};
 pub use tokio_modbus::ExceptionCode;

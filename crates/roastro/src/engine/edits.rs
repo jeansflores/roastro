@@ -67,6 +67,12 @@ impl Engine {
             Edit::Roasts(query, reply) => {
                 let _ = reply.send(self.roast_page(query));
             }
+            Edit::RetryNow(reply) => {
+                let _ = reply.send(self.retry_now());
+            }
+            Edit::LinkDrops(reply) => {
+                let _ = reply.send(self.link_drops());
+            }
         }
     }
 

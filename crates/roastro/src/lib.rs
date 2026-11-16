@@ -25,7 +25,7 @@ pub use store::RoastId;
 use store::Store;
 use tokio::sync::{broadcast, mpsc};
 
-use crate::engine::{Engine, Request};
+use crate::engine::{Engine, Failure, LinkCommand, Request};
 use crate::record::Recording;
 use crate::wire::{Live, RorSettings};
 
@@ -94,16 +94,9 @@ pub fn start(config: Config) -> anyhow::Result<Running> {
     };
     let recording = Recording::open(store, rules)?;
 
-    // v1 never writes to the PLC: no opt-in, whatever the target.
-    let client = Client::new(plc::Config {
-        allow_write: false,
-        ..plc::Config::new(&config.url, Arc::new(config.map))
-    })?;
-    let mut polls = Poller {
-        interval: config.interval,
-        ..Poller::default()
-    }
-    .run(client);
+    let map = Arc::new(config.map);
+    // Fail now on an address that can never work.
+    connect(&config.url, &map)?;
     tracing::info!(url = %config.url, "reading the PLC");
 
     // The engine owns the database on its own thread (SQLite is synchronous).
@@ -114,24 +107,79 @@ pub fn start(config: Config) -> anyhow::Result<Running> {
         gap: rules.gap,
         time_scale: config.time_scale,
     };
-    let engine = Engine::new(recording, live.clone(), ror, now_ms);
+    let (link_control, commands) = mpsc::channel(4);
+    let engine = Engine::new(recording, live.clone(), ror, now_ms).with_link_control(link_control);
     std::thread::Builder::new()
         .name("roastro-engine".into())
         .spawn(move || engine.run(inbox))?;
 
-    let to_engine = requests.clone();
-    tokio::spawn(async move {
-        while let Some(ev) = polls.recv().await {
-            let result = ev.result.map_err(|e| e.to_string());
-            let poll = Request::Poll {
-                at: now_ms(),
-                result,
-                retry_in: ev.retry_in,
-            };
-            if to_engine.send(poll).await.is_err() {
-                return;
+    tokio::spawn(link(
+        config.url,
+        map,
+        config.interval,
+        requests.clone(),
+        commands,
+    ));
+    Ok(Running { requests, live })
+}
+
+/// A client for the machine. v1 never writes to the PLC: no opt-in,
+/// whatever the target.
+fn connect(url: &str, map: &Arc<Map>) -> Result<Client, plc::Error> {
+    Client::new(plc::Config {
+        allow_write: false,
+        ..plc::Config::new(url, Arc::clone(map))
+    })
+}
+
+/// Polls the machine and hands every result to the engine; dials again at
+/// once when the engine asks (Retry now).
+async fn link(
+    url: String,
+    map: Arc<Map>,
+    interval: Duration,
+    to_engine: mpsc::Sender<Request>,
+    mut commands: mpsc::Receiver<LinkCommand>,
+) {
+    loop {
+        let client = match connect(&url, &map) {
+            Ok(client) => client,
+            Err(err) => {
+                let poll = Request::Poll {
+                    at: now_ms(),
+                    result: Err(Failure::from(&err)),
+                    retry_in: Duration::from_secs(10),
+                };
+                if to_engine.send(poll).await.is_err() || commands.recv().await.is_none() {
+                    return;
+                }
+                continue;
+            }
+        };
+        // Dropping the receiver stops the poller.
+        let mut polls = Poller {
+            interval,
+            ..Poller::default()
+        }
+        .run(client);
+        loop {
+            tokio::select! {
+                event = polls.recv() => {
+                    let Some(event) = event else { break };
+                    let poll = Request::Poll {
+                        at: now_ms(),
+                        result: event.result.map_err(|e| Failure::from(&e)),
+                        retry_in: event.retry_in,
+                    };
+                    if to_engine.send(poll).await.is_err() {
+                        return;
+                    }
+                }
+                command = commands.recv() => match command {
+                    Some(LinkCommand::RetryNow) => break,
+                    None => return,
+                },
             }
         }
-    });
-    Ok(Running { requests, live })
+    }
 }
