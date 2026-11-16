@@ -372,7 +372,7 @@ impl Engine {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::{AtomicI64, Ordering};
+    use std::cell::Cell;
 
     use recorder::Rules;
     use store::Store;
@@ -380,10 +380,13 @@ mod tests {
     use super::*;
     use crate::wire::{CoffeeIn, EventIn, NextRoastIn, NoteIn, RoastPatchIn};
 
-    /// A clock the tests move by hand.
-    static NOW: AtomicI64 = AtomicI64::new(0);
+    thread_local! {
+        /// A clock the tests move by hand, one per test thread so tests
+        /// running in parallel do not move each other's clock.
+        static NOW: Cell<Millis> = const { Cell::new(0) };
+    }
     fn now() -> Millis {
-        NOW.load(Ordering::SeqCst)
+        NOW.get()
     }
 
     fn engine() -> (Engine, LiveReceiver) {
@@ -399,7 +402,7 @@ mod tests {
     }
 
     fn poll(e: &mut Engine, second: i64, bt: f64) {
-        NOW.store(second * 1000, Ordering::SeqCst);
+        NOW.set(second * 1000);
         let reading = Reading {
             values: [("bt".to_owned(), bt)].into(),
             latency: Duration::ZERO,
@@ -538,7 +541,7 @@ mod tests {
             .map(|_| ())
         };
         assert_eq!(set(&mut e, "dry_end", 200), Err("event_in_future"));
-        NOW.store(100_500, Ordering::SeqCst);
+        NOW.set(100_500);
         assert_eq!(
             set(&mut e, "second_crack", 100),
             Ok(()),
