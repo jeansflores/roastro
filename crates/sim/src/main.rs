@@ -19,7 +19,7 @@ use axum::routing::get;
 use axum::{Json, Router};
 use clap::Parser;
 use regmap::Map;
-use sim::{Autopilot, Fault, ModbusService, Sim};
+use sim::{Autopilot, Fault, ModbusService, Scenario, Script, Sim};
 use tokio::net::TcpListener;
 use tokio_modbus::server::tcp::{Server, accept_tcp_connection};
 
@@ -44,6 +44,10 @@ struct Args {
     /// Seed for the probe noise (default: the clock).
     #[arg(long)]
     seed: Option<u64>,
+    /// Make the PLC misbehave on cue: noisy-charge, missed-drop, dropout,
+    /// stuck-probe, spike, slow or alarms.
+    #[arg(long)]
+    scenario: Option<Scenario>,
 }
 
 /// Accepts `host:port`, optionally prefixed with `tcp://`.
@@ -58,6 +62,7 @@ fn parse_addr(s: &str) -> Result<SocketAddr, String> {
 struct Control {
     speed: f64,
     autopilot: Option<Autopilot>,
+    script: Option<Script>,
 }
 
 #[derive(Clone)]
@@ -92,6 +97,7 @@ async fn main() -> anyhow::Result<()> {
         control: Arc::new(Mutex::new(Control {
             speed: args.speed,
             autopilot: args.auto.then(Autopilot::default),
+            script: args.scenario.map(Script::new),
         })),
     };
 
@@ -146,6 +152,9 @@ async fn physics(app: App) {
             acc = 0.0;
             if let Some(ap) = control.autopilot.as_mut() {
                 ap.tick(&mut sim);
+            }
+            if let Some(script) = control.script.as_mut() {
+                script.tick(&mut sim);
             }
         }
     }

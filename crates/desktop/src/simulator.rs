@@ -9,7 +9,12 @@ use regmap::Map;
 
 /// Serves the simulator on `127.0.0.1:port` with its autopilot on and the
 /// warm-up skipped. Must run inside a Tokio runtime.
-pub async fn start(map: Arc<Map>, speed: f64, port: u16) -> anyhow::Result<()> {
+pub async fn start(
+    map: Arc<Map>,
+    speed: f64,
+    port: u16,
+    scenario: Option<sim::Scenario>,
+) -> anyhow::Result<()> {
     let model = Arc::new(Mutex::new(sim::Sim::new(1)));
     model
         .lock()
@@ -32,6 +37,7 @@ pub async fn start(map: Arc<Map>, speed: f64, port: u16) -> anyhow::Result<()> {
     });
     tokio::spawn(async move {
         let mut pilot = sim::Autopilot::default();
+        let mut script = scenario.map(sim::Script::new);
         let mut tick = tokio::time::interval(Duration::from_millis(100));
         let mut acc = 0.0;
         loop {
@@ -42,6 +48,9 @@ pub async fn start(map: Arc<Map>, speed: f64, port: u16) -> anyhow::Result<()> {
             if acc >= 1.0 {
                 acc = 0.0;
                 pilot.tick(&mut s);
+                if let Some(script) = script.as_mut() {
+                    script.tick(&mut s);
+                }
             }
         }
     });

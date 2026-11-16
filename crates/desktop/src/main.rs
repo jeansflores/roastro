@@ -55,6 +55,10 @@ struct Args {
     /// Read the built-in simulator instead of the machine set up in the app.
     #[arg(long)]
     simulator: bool,
+    /// Make the built-in simulator misbehave on cue (development): noisy-charge,
+    /// missed-drop, dropout, stuck-probe, spike, slow or alarms.
+    #[arg(long)]
+    scenario: Option<sim::Scenario>,
     /// Port for the built-in simulator (also the Demo machine's).
     #[arg(long, default_value_t = 5502)]
     sim_port: u16,
@@ -90,13 +94,14 @@ fn main() -> anyhow::Result<()> {
     // --simulator) needs it.
     let started: Arc<tokio::sync::OnceCell<String>> = Arc::new(tokio::sync::OnceCell::new());
     let port = args.sim_port;
+    let scenario = args.scenario;
     let demo: roastro::DemoHook = Arc::new(move || {
         let started = started.clone();
         Box::pin(async move {
             started
                 .get_or_try_init(|| async {
                     let map = Arc::new(roastro::machine::model_map(roastro::machine::SIMULATOR)?);
-                    simulator::start(map, time_scale, port)
+                    simulator::start(map, time_scale, port, scenario)
                         .await
                         .context("starting the built-in simulator")?;
                     Ok::<_, anyhow::Error>(format!("tcp://127.0.0.1:{port}"))

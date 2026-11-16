@@ -5,7 +5,9 @@ mod autopilot;
 mod modbus;
 mod model;
 mod rng;
+mod scenario;
 
 pub use autopilot::{Autopilot, Phase};
 pub use modbus::ModbusService;
 pub use model::{Error, Event, Fault, Sim, Snapshot};
+pub use scenario::{Scenario, Script};

@@ -43,9 +43,19 @@ pub struct Sample {
     pub values: HashMap<String, f64>,
 }
 
+/// Bean temperatures a probe can really read (°C). Outside it is a broken
+/// or disconnected probe (999.9, -3276.8): never an event, never a rate.
+pub const PLAUSIBLE_BT: std::ops::RangeInclusive<f64> = -20.0..=400.0;
+
+/// The bean temperature if a probe could really read it.
+#[must_use]
+pub fn plausible_bt(bt: f64) -> Option<f64> {
+    PLAUSIBLE_BT.contains(&bt).then_some(bt)
+}
+
 impl Sample {
     fn bt(&self) -> Option<f64> {
-        self.values.get("bt").copied()
+        self.values.get("bt").copied().and_then(plausible_bt)
     }
 
     fn timer(&self) -> Option<f64> {
@@ -233,6 +243,8 @@ pub struct Recorder {
     prev_timer: Option<f64>,
     /// When the PLC timer stopped advancing, if it has.
     timer_stalled_at: Option<Millis>,
+    /// The last few plausible BT readings, for the median detection reads.
+    last_bts: VecDeque<f64>,
 }
 
 impl Recorder {
@@ -247,6 +259,7 @@ impl Recorder {
             last_at: None,
             prev_timer: None,
             timer_stalled_at: None,
+            last_bts: VecDeque::new(),
         }
     }
 
@@ -310,6 +323,7 @@ impl Recorder {
     }
 
     fn sample(&mut self, s: &Sample, out: &mut Vec<Output>) {
+        let raw = s;
         self.close_if_gap_too_long(s.at, out);
         if self
             .last_at
@@ -317,11 +331,15 @@ impl Recorder {
         {
             // A Gap: detection starts over.
             self.contiguous.clear();
+            self.last_bts.clear();
             self.prev_timer = None;
             self.timer_stalled_at = None;
         }
         let since_prev = self.last_at.map_or(0, |last| s.at - last);
         let timer = s.timer();
+        // A PLC timer that starts over during a roast is a new Charge, even
+        // when the Drop left no trace on BT.
+        let restarted = matches!((self.prev_timer, timer), (Some(prev), Some(now)) if now < prev);
         let timer_advanced =
             matches!((self.prev_timer, timer), (Some(prev), Some(now)) if now > prev);
         if timer_advanced {
@@ -331,7 +349,18 @@ impl Recorder {
         }
         self.prev_timer = timer;
         self.last_at = Some(s.at);
-        self.push_windows(s);
+        let det = self.detection_sample(s);
+        self.push_windows(s, det.clone());
+        let s = &det;
+
+        if !matches!(self.phase, Phase::Waiting)
+            && let Some(at) = timer
+                .filter(|_| restarted)
+                .and_then(|t| self.charge_by_timer(s.at, since_prev, t))
+        {
+            self.charge(at, Source::Auto, out);
+            return;
+        }
 
         match &mut self.phase {
             Phase::Waiting => {
@@ -345,7 +374,7 @@ impl Recorder {
                 }
             }
             Phase::Roasting(roast) => {
-                out.push(Output::Sample(s.clone()));
+                out.push(Output::Sample(raw.clone()));
                 roast.timer_ran |= timer_advanced;
                 if let Some(at) = turning_point(roast, s, self.rules.turning_point_rise) {
                     out.push(Output::Event {
@@ -365,7 +394,7 @@ impl Recorder {
                 }
             }
             Phase::Tail { drop_at } => {
-                out.push(Output::Sample(s.clone()));
+                out.push(Output::Sample(raw.clone()));
                 if s.at - *drop_at >= self.rules.roast_ms(self.rules.tail) {
                     self.phase = Phase::Waiting;
                     out.push(Output::Closed(Closure::AfterDrop));
@@ -387,7 +416,29 @@ impl Recorder {
         })
     }
 
-    fn push_windows(&mut self, s: &Sample) {
+    /// The reading as detection sees it: BT is the median of the last three
+    /// plausible readings, so probe noise and a lone spike make no event; an
+    /// implausible BT is left out.
+    fn detection_sample(&mut self, s: &Sample) -> Sample {
+        let mut det = s.clone();
+        match s.bt() {
+            Some(bt) => {
+                self.last_bts.push_back(bt);
+                if self.last_bts.len() > 3 {
+                    self.last_bts.pop_front();
+                }
+                let mut sorted: Vec<f64> = self.last_bts.iter().copied().collect();
+                sorted.sort_by(f64::total_cmp);
+                det.values.insert("bt".to_owned(), sorted[sorted.len() / 2]);
+            }
+            None => {
+                det.values.remove("bt");
+            }
+        }
+        det
+    }
+
+    fn push_windows(&mut self, s: &Sample, det: Sample) {
         let lead_in = self.rules.roast_ms(self.rules.lead_in);
         let window = self
             .rules
@@ -396,7 +447,7 @@ impl Recorder {
         while self.recent.front().is_some_and(|f| s.at - f.at > lead_in) {
             self.recent.pop_front();
         }
-        self.contiguous.push_back(s.clone());
+        self.contiguous.push_back(det);
         while self
             .contiguous
             .front()
