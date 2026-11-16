@@ -1,0 +1,570 @@
+<title>Roastro Roast History</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;600;700&display=swap">
+<style>
+/* PROTOTYPE, throwaway: jeansflores/roastro#10 "Roast history and curve comparison".
+   Three structurally different variants on one page, switched from the bottom bar (or ← / →, or #a #b #c).
+   Layout concept: the live screen's dark cockpit (variant D) carried over to the history: chart-first, numbers in mono. */
+:root {
+  --bg: #0b0c0e; --panel: #121317; --panel-2: #181a1f; --line: rgba(255,255,255,.08);
+  --fg: rgba(255,255,255,.92); --dim: rgba(255,255,255,.55); --faint: rgba(255,255,255,.32);
+  --accent: #f5a524; --bt: #f5a524; --et: #7aa2f7; --ror: #2dd4bf; --gas: #c084fc; --air: #a3e635; --danger: #f87171;
+  --sans: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --mono: "JetBrains Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  color-scheme: dark;
+}
+html, body { height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 14px/1.45 var(--sans); }
+* { box-sizing: border-box; }
+button, select, input { font: inherit; color: inherit; }
+button { cursor: pointer; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.mono, .num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+.label { font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: var(--dim); }
+.app { height: 100%; display: flex; flex-direction: column; }
+header.top { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; padding-block: 12px; border-bottom: 1px solid var(--line);
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.brand { font: 700 13px var(--mono); letter-spacing: .2em; color: var(--accent); }
+.tabs { display: flex; gap: 4px; }
+.tab { padding: 4px 12px; border-radius: 999px; border: 1px solid transparent; background: none; color: var(--dim); font-size: 13px; }
+.tab.on { border-color: var(--line); color: var(--fg); background: var(--panel-2); }
+.next-ref { margin-left: auto; font-size: 13px; color: var(--dim); }
+.next-ref b { color: var(--accent); font-weight: 600; }
+main.body { flex: 1; min-height: 0; display: flex; }
+.btn { border: 1px solid var(--line); background: var(--panel-2); border-radius: 8px; padding: 6px 12px; font-size: 13px; }
+.btn:hover { border-color: rgba(255,255,255,.2); }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: #0b0c0e; font-weight: 600; }
+.btn.small { padding: 3px 8px; font-size: 12px; }
+.chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px; border-radius: 999px; border: 1px solid var(--line); background: none; font-size: 12px; color: var(--dim); }
+.chip.on { color: var(--fg); border-color: rgba(245,165,36,.5); background: rgba(245,165,36,.12); }
+.field { background: var(--panel-2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; font-size: 13px; }
+.swatch { width: 10px; height: 10px; border-radius: 3px; flex: none; }
+.star { color: var(--accent); }
+.chartbox { position: relative; min-height: 0; }
+.chartbox canvas { width: 100%; height: 100%; display: block; }
+.tip { position: absolute; pointer-events: none; background: var(--panel-2); border: 1px solid rgba(255,255,255,.12); border-radius: 10px; padding: 8px 10px;
+  font: 12px var(--mono); box-shadow: 0 8px 24px rgba(0,0,0,.5); min-width: 170px; z-index: 5; }
+.tip .t { font-weight: 700; font-size: 13px; margin-bottom: 4px; }
+.tip .r { display: flex; gap: 8px; align-items: center; justify-content: space-between; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 14px; font-size: 12px; color: var(--dim); }
+.legend span { display: inline-flex; gap: 6px; align-items: center; }
+.phases { display: flex; height: 8px; border-radius: 99px; overflow: hidden; background: rgba(255,255,255,.05); }
+.figs { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); gap: 14px; }
+.fig .v { font: 700 24px/1.1 var(--mono); }
+.fig .u { font-size: 12px; color: var(--faint); margin-left: 3px; }
+.notes { display: grid; gap: 6px; }
+.note { display: flex; gap: 10px; font-size: 13px; }
+.note .when { font: 12px var(--mono); color: var(--dim); width: 40px; flex: none; }
+.empty { color: var(--faint); font-size: 13px; padding: 24px; }
+
+/* ---------- A: Library ---------- */
+.a-list { width: 340px; flex: none; border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-height: 0; }
+.a-filters { display: grid; gap: 8px; padding: 14px 16px; border-bottom: 1px solid var(--line); }
+.a-rows { overflow-y: auto; flex: 1; }
+.a-day { padding: 10px 16px 4px; font-size: 11px; color: var(--faint); letter-spacing: .08em; text-transform: uppercase; }
+.a-row { display: grid; grid-template-columns: 20px 1fr auto; gap: 10px; align-items: center; padding: 8px 16px; cursor: pointer; border-left: 2px solid transparent; }
+.a-row:hover { background: rgba(255,255,255,.03); }
+.a-row.sel { background: rgba(245,165,36,.07); border-left-color: var(--accent); }
+.a-row .t { font-weight: 600; font-size: 13px; }
+.a-row .s { font-size: 12px; color: var(--dim); }
+.a-row .m { font: 12px var(--mono); color: var(--dim); text-align: right; }
+.a-detail { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; overflow-y: auto; }
+.a-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 10px 18px; padding: 16px 20px 8px; }
+.a-head h1 { font: 700 22px var(--sans); margin: 0; }
+.a-chart { height: 46vh; min-height: 260px; margin: 0 12px; }
+.a-under { display: grid; grid-template-columns: 1.3fr 1fr; gap: 24px; padding: 16px 20px 90px; }
+
+/* ---------- B: Compare table ---------- */
+.b-wrap { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.b-chartzone { flex: 1.1; min-height: 240px; display: flex; flex-direction: column; border-bottom: 1px solid var(--line); }
+.b-ctl { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center; padding: 10px 16px; }
+.b-chart { flex: 1; margin: 0 8px; }
+.b-delta { display: flex; gap: 0; overflow-x: auto; border-top: 1px solid var(--line); }
+.b-delta > div { padding: 8px 14px; border-right: 1px solid var(--line); min-width: 120px; }
+.b-tablezone { flex: 1; min-height: 0; overflow: auto; padding-bottom: 70px; }
+table.b { border-collapse: collapse; width: 100%; font-size: 13px; }
+table.b th { position: sticky; top: 0; background: var(--panel); text-align: left; font-weight: 500; color: var(--dim); font-size: 11px; letter-spacing: .06em;
+  text-transform: uppercase; padding: 8px 10px; border-bottom: 1px solid var(--line); cursor: pointer; white-space: nowrap; z-index: 1; }
+table.b th.num, table.b td.num { text-align: right; }
+table.b td { padding: 6px 10px; border-bottom: 1px solid rgba(255,255,255,.04); white-space: nowrap; }
+table.b tr.on td { background: rgba(255,255,255,.035); }
+table.b tr:hover td { background: rgba(255,255,255,.05); }
+.b-check { width: 16px; height: 16px; border-radius: 4px; border: 1px solid rgba(255,255,255,.3); display: inline-block; vertical-align: middle; }
+.spark { width: 120px; height: 26px; display: block; }
+.b-drawer { position: fixed; right: 0; top: 0; bottom: 0; width: min(520px, 100%); background: var(--panel); border-left: 1px solid var(--line); z-index: 20;
+  display: flex; flex-direction: column; box-shadow: -20px 0 40px rgba(0,0,0,.4); }
+.b-drawer .in { overflow-y: auto; padding: 16px 20px 80px; display: grid; gap: 16px; }
+
+/* ---------- C: By coffee ---------- */
+.c-coffees { width: 260px; flex: none; border-right: 1px solid var(--line); background: var(--panel); overflow-y: auto; padding-bottom: 70px; }
+.c-coffee { padding: 14px 16px; border-bottom: 1px solid var(--line); cursor: pointer; display: grid; gap: 4px; border-left: 2px solid transparent; }
+.c-coffee.sel { background: rgba(245,165,36,.07); border-left-color: var(--accent); }
+.c-coffee .n { font-weight: 600; }
+.c-coffee .s { font-size: 12px; color: var(--dim); }
+.c-main { flex: 1; min-width: 0; overflow-y: auto; padding: 18px 20px 90px; display: grid; gap: 18px; align-content: start; }
+.c-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 12px; }
+.c-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 10px 12px; cursor: pointer; display: grid; gap: 6px; text-align: left; }
+.c-card:hover { border-color: rgba(255,255,255,.2); }
+.c-card.ref { border-color: rgba(245,165,36,.55); }
+.c-card canvas { width: 100%; height: 90px; display: block; }
+.c-card .row { display: flex; justify-content: space-between; font-size: 12px; color: var(--dim); }
+.c-detail { display: grid; gap: 14px; }
+.c-chart { height: 44vh; min-height: 260px; }
+.c-vs { display: grid; grid-template-columns: auto repeat(3, minmax(70px, auto)); gap: 4px 18px; font: 13px var(--mono); align-items: baseline; }
+.c-vs .h { font: 11px var(--sans); letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+
+/* ---------- switcher (scaffolding, not design) ---------- */
+.switcher { position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(14px + env(safe-area-inset-bottom, 0px)); z-index: 50;
+  display: flex; align-items: center; gap: 6px; background: #fff; color: #111; border-radius: 999px; padding: 4px; box-shadow: 0 6px 24px rgba(0,0,0,.6); font: 600 13px var(--sans); }
+.switcher button { border: 0; background: #eee; color: #111; border-radius: 999px; width: 30px; height: 30px; font-size: 15px; }
+.switcher span { padding: 0 10px; white-space: nowrap; }
+
+@media (max-width: 860px) {
+  main.body { flex-direction: column; overflow-y: auto; }
+  .a-list, .c-coffees { width: auto; max-height: 40vh; border-right: 0; border-bottom: 1px solid var(--line); }
+  .a-under { grid-template-columns: 1fr; }
+  .b-chartzone { min-height: 320px; }
+}
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+
+<div class="app">
+  <header class="top">
+    <span class="brand">ROASTRO</span>
+    <nav class="tabs"><button class="tab">Live roast</button><button class="tab on">History</button></nav>
+    <span class="next-ref" id="nextRef"></span>
+  </header>
+  <main class="body" id="view"></main>
+</div>
+<div class="switcher" aria-label="Prototype variant switcher">
+  <button id="prev" aria-label="Previous variant">←</button><span id="vname"></span><button id="next" aria-label="Next variant">→</button>
+</div>
+
+<script>
+// ===== Synthetic roasts (example data, not real roasts) ====================================
+const C = { bt: '#f5a524', et: '#7aa2f7', ror: '#2dd4bf', gas: '#c084fc', air: '#a3e635' };
+const PALETTE = ['#f5a524', '#7aa2f7', '#f472b6', '#2dd4bf', '#a3e635', '#c084fc'];
+function rng(seed) { return () => { seed |= 0; seed = seed + 0x6D2B79F5 | 0; let t = Math.imul(seed ^ seed >>> 15, 1 | seed); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+const COFFEES = [
+  { id: 'eth', name: 'Ethiopia Guji Natural', lot: '2401', origin: 'Ethiopia' },
+  { id: 'bra', name: 'Brazil Cerrado Mineiro', lot: '2398', origin: 'Brazil' },
+  { id: 'col', name: 'Colombia Huila Washed', lot: '2410', origin: 'Colombia' },
+  { id: 'ken', name: 'Kenya Nyeri AA', lot: '2412', origin: 'Kenya' },
+];
+const coffee = id => COFFEES.find(c => c.id === id);
+
+function makeRoast(number, coffeeId, date, seed, extra = {}) {
+  const r = rng(seed);
+  const p = {
+    charge: 196 + r() * 12, tpT: 88 + r() * 10, tp: 80 + r() * 25,
+    r0: 17 + r() * 5, T: 300 + r() * 120, rEnd: 3 + r() * 2.5, dtr: 0.17 + r() * 0.07,
+    ...extra,
+  };
+  const bt = [], et = [], gas = [], air = [];
+  let b = p.charge, de = null, fc = null, crashAt = null, drop = null;
+  for (let t = 0; t <= 1300; t++) {
+    if (t <= p.tp) { const u = (p.tp - t) / p.tp; b = p.tpT + (p.charge - p.tpT) * u * u; }
+    else {
+      let ror = p.r0 * Math.exp(-(t - p.tp) / p.T) + p.rEnd;
+      if (p.swing && t > 220 && t < 560) ror += 3.2 * Math.sin((t - 220) / 38);
+      if (p.crash && crashAt !== null) { const k = t - crashAt; if (k < 70) ror -= 7 * Math.sin(Math.PI * k / 70); else if (k < 120) ror += 3 * Math.sin(Math.PI * (k - 70) / 50); }
+      b += Math.max(ror, -2) / 60;
+    }
+    if (de === null && t > p.tp && b >= 150) de = t;
+    if (fc === null && t > p.tp && b >= 196) { fc = t; crashAt = t; drop = Math.round(fc / (1 - p.dtr)); }
+    const e = Math.max(165 + 65 * Math.exp(-t / 40), b + 20 + 28 * Math.exp(-t / 300)) + (p.swing && t > 200 && t < 560 ? 4 * Math.sin((t - 200) / 38) : 0);
+    bt.push(b); et.push(e);
+    const g = p.swing ? (t < 200 ? 75 : t < 560 ? (Math.floor(t / 60) % 2 ? 80 : 45) : 40) : t < 240 ? 75 : fc === null || t < fc - 60 ? 60 : 40;
+    gas.push(fc !== null && t >= fc - 60 && !p.swing ? 40 : g);
+    air.push(de === null ? 40 : fc === null ? 60 : 80);
+    if (drop !== null && t >= drop) break;
+  }
+  const ror = bt.map((v, t) => t < p.tp + 20 || t < 30 ? null : (v - bt[t - 30]) * 2);
+  const green = Math.round(4000 + r() * 1000);
+  const loss = 0.13 + p.dtr * 0.12 + r() * 0.01;
+  return {
+    id: 'r' + number, number, coffee: coffeeId, date, roastedBy: number % 3 ? 'Ana' : 'Léo',
+    bt, et, ror, gas, air, green, roasted: Math.round(green * (1 - loss)),
+    events: { charge: 0, tp: Math.round(p.tp), de, fc, drop }, notes: extra.notes || [], ref: null,
+  };
+}
+
+const ROASTS = (() => {
+  const plan = [
+    ['bra', '2026-11-02 08:10'], ['bra', '2026-11-02 08:35'], ['eth', '2026-11-02 09:05'],
+    ['col', '2026-11-04 08:05'], ['col', '2026-11-04 08:30', { swing: true, notes: [[240, 'gas see-saw, burner sticking?'], [520, 'evened out']] }],
+    ['eth', '2026-11-04 09:00'], ['ken', '2026-11-06 08:00'], ['ken', '2026-11-06 08:28', { crash: true, notes: [[0, 'humid morning'], [560, 'crash after first crack, cut gas too late']] }],
+    ['bra', '2026-11-06 09:00'], ['eth', '2026-11-09 08:10', { notes: [[300, 'yellow, smells of bread'], [610, 'FC rolling']] }],
+    ['eth', '2026-11-09 08:40', { dtr: 0.22 }], ['col', '2026-11-09 09:10'], ['bra', '2026-11-11 08:05'],
+    ['ken', '2026-11-11 08:30', { notes: [[480, 'more air earlier']] }], ['eth', '2026-11-11 09:00', { crash: true }],
+    ['col', '2026-11-13 08:00', { notes: [[650, 'dropped a bit early']] }], ['bra', '2026-11-13 08:30'], ['eth', '2026-11-14 08:10', { notes: [[200, 'new bag of lot 2401']] }],
+  ];
+  const list = plan.map(([c, d, x], i) => makeRoast(31 + i, c, d, 1000 + i * 17, x || {}));
+  // Each roast's reference: the previous roast of the same coffee.
+  list.forEach((rt, i) => { const prev = list.slice(0, i).reverse().find(o => o.coffee === rt.coffee); rt.ref = prev ? prev.id : null; });
+  return list.reverse(); // newest first
+})();
+const byId = id => ROASTS.find(r => r.id === id);
+
+// ===== Shared helpers ======================================================================
+const clock = s => s == null ? '—' : `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, '0')}`;
+const f1 = v => v == null ? '—' : v.toFixed(1);
+const metrics = r => {
+  const e = r.events, total = e.drop;
+  return {
+    total, fc: e.fc, de: e.de, dev: e.drop - e.fc, dtr: (e.drop - e.fc) / e.drop * 100,
+    dropBt: r.bt[e.drop] ?? r.bt.at(-1), loss: (1 - r.roasted / r.green) * 100, maxRor: Math.max(...r.ror.filter(v => v != null)),
+    phases: [['drying', e.de, C.et], ['maillard', e.fc - e.de, C.bt], ['development', e.drop - e.fc, C.ror]],
+  };
+};
+// Biggest RoR swing between 3 min and Drop: what "drastic temperature swings" looks for.
+const swing = r => { let worst = 0; for (let t = 200; t < r.ror.length - 30; t++) { const a = r.ror[t], b = r.ror[t + 30]; if (a != null && b != null) worst = Math.max(worst, a - b); } return worst; };
+const dayLabel = d => new Date(d.replace(' ', 'T')).toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' });
+const timeLabel = d => d.slice(11);
+const EVENT = { tp: 'TP', de: 'Dry end', fc: 'First crack', drop: 'Drop' };
+
+const state = {
+  variant: 'a', nextRef: ROASTS.find(r => r.coffee === 'eth').id,
+  a: { coffee: 'all', range: 'all', q: '', sel: ROASTS[0].id, compare: new Set() },
+  b: { coffee: 'all', sort: ['date', -1], picked: new Set([ROASTS[0].id, ROASTS[0].ref].filter(Boolean)), align: 'charge', ror: true, et: false, drawer: null },
+  c: { coffee: ROASTS[0].coffee, open: null, against: 'ref' },
+};
+function setNextRef(id) { state.nextRef = id; render(); }
+function nextRefLine() {
+  const r = byId(state.nextRef);
+  document.getElementById('nextRef').innerHTML = r ? `Next roast reference: <b>Roast #${r.number}</b> · ${coffee(r.coffee).name}` : 'Next roast: no reference';
+}
+function inRange(r, range) {
+  if (range === 'all') return true;
+  const days = range === '7d' ? 7 : 30, now = new Date('2026-11-16T12:00');
+  return (now - new Date(r.date.replace(' ', 'T'))) / 864e5 <= days;
+}
+
+// ===== Chart ===============================================================================
+// series: [{ r, color, main }] main = the roast whose events and gas/air are drawn.
+// opts: { align: 'charge'|'fc', ror, et, strip, events, notes, compact }
+const charts = new Map();
+function chart(canvas, series, opts = {}) {
+  charts.set(canvas, { series, opts, hover: null });
+  drawChart(canvas);
+  if (!canvas._wired && !opts.compact) {
+    canvas._wired = true;
+    canvas.addEventListener('mousemove', ev => { const c = charts.get(canvas); if (!c) return; const rect = canvas.getBoundingClientRect(); c.hover = { x: ev.clientX - rect.left, y: ev.clientY - rect.top }; drawChart(canvas); });
+    canvas.addEventListener('mouseleave', () => { const c = charts.get(canvas); if (c) { c.hover = null; drawChart(canvas); } });
+  }
+}
+function drawChart(canvas) {
+  const cfg = charts.get(canvas); if (!cfg) return;
+  const { series, opts } = cfg;
+  const dpr = window.devicePixelRatio || 1, W = canvas.clientWidth, H = canvas.clientHeight;
+  if (!W || !H) return;
+  canvas.width = W * dpr; canvas.height = H * dpr;
+  const g = canvas.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+  const compact = !!opts.compact;
+  const pad = compact ? { l: 4, r: 4, t: 4, b: 4 } : { l: 40, r: 36, t: 14, b: opts.strip ? 70 : 26 };
+  const shift = r => opts.align === 'fc' ? r.events.fc : 0;
+  const xmin = opts.align === 'fc' ? -Math.max(...series.map(s => s.r.events.fc)) : 0;
+  const xmax = Math.max(60, ...series.map(s => s.r.bt.length - 1 - shift(s.r))) + (compact ? 0 : 20);
+  const plotB = H - pad.b, plotH = plotB - pad.t;
+  const X = t => pad.l + (t - xmin) / (xmax - xmin) * (W - pad.l - pad.r);
+  const Y = v => pad.t + (1 - (v - 50) / 200) * plotH;           // 50..250 °C
+  const R = v => pad.t + (1 - v / 30) * plotH;                    // 0..30 °C/min
+  if (!compact) {
+    g.font = '11px "JetBrains Mono", monospace'; g.fillStyle = 'rgba(255,255,255,.35)'; g.strokeStyle = 'rgba(255,255,255,.06)'; g.lineWidth = 1;
+    for (let v = 50; v <= 250; v += 50) { g.beginPath(); g.moveTo(pad.l, Y(v)); g.lineTo(W - pad.r, Y(v)); g.stroke(); g.textAlign = 'right'; g.fillText(v + '°', pad.l - 6, Y(v) + 4); }
+    if (opts.ror) for (let v = 0; v <= 30; v += 10) { g.textAlign = 'left'; g.fillStyle = 'rgba(45,212,191,.5)'; g.fillText(v, W - pad.r + 6, R(v) + 4); }
+    g.fillStyle = 'rgba(255,255,255,.35)'; g.textAlign = 'center';
+    const step = (xmax - xmin) > 900 ? 120 : 60;
+    for (let t = Math.ceil(xmin / step) * step; t <= xmax; t += step) { g.fillText((t < 0 ? '−' : '') + clock(Math.abs(t)), X(t), plotB + 16); g.strokeStyle = 'rgba(255,255,255,.04)'; g.beginPath(); g.moveTo(X(t), pad.t); g.lineTo(X(t), plotB); g.stroke(); }
+    if (opts.align === 'fc') { g.strokeStyle = 'rgba(255,255,255,.25)'; g.setLineDash([3, 4]); g.beginPath(); g.moveTo(X(0), pad.t); g.lineTo(X(0), plotB); g.stroke(); g.setLineDash([]); g.fillText('first crack', X(0), pad.t + 10); }
+  }
+  // phases tint behind the main roast
+  const main = series.find(s => s.main);
+  if (main && !compact && opts.align !== 'fc') {
+    const e = main.r.events;
+    [[0, e.de, C.et], [e.de, e.fc, C.bt], [e.fc, e.drop, C.ror]].forEach(([a, b, col]) => { g.fillStyle = col + '0d'; g.fillRect(X(a), pad.t, X(b) - X(a), plotH); });
+  }
+  const line = (arr, s, f, color, width, dash, alpha) => {
+    g.strokeStyle = color; g.globalAlpha = alpha ?? 1; g.lineWidth = width; g.setLineDash(dash || []); g.beginPath(); let on = false;
+    arr.forEach((v, t) => { if (v == null) { on = false; return; } const x = X(t - s), y = f(v); on ? g.lineTo(x, y) : g.moveTo(x, y); on = true; });
+    g.stroke(); g.setLineDash([]); g.globalAlpha = 1;
+  };
+  series.forEach(s => {
+    const sh = shift(s.r);
+    if (opts.et) line(s.r.et, sh, Y, s.single ? C.et : s.color, compact ? 1 : 1.4, s.dash, s.single ? 1 : 0.45);
+    if (opts.ror) line(s.r.ror, sh, R, s.single ? C.ror : s.color, compact ? 1 : 1.3, s.dash || (s.single ? [] : [1, 3]), s.single ? 1 : 0.8);
+    line(s.r.bt, sh, Y, s.single ? C.bt : s.color, compact ? 1.4 : 2.2, s.dash, 1);
+  });
+  // gas / air strip
+  if (opts.strip && main && !compact) {
+    const top = plotB + 26, h = 34, sh = shift(main.r);
+    g.fillStyle = 'rgba(255,255,255,.35)'; g.textAlign = 'left'; g.font = '10px Inter, sans-serif';
+    g.fillText('gas', 4, top + 12); g.fillText('air', 4, top + 28);
+    [[main.r.gas, C.gas], [main.r.air, C.air]].forEach(([arr, col]) => { g.strokeStyle = col; g.lineWidth = 1.4; g.beginPath(); arr.forEach((v, t) => { const x = X(t - sh), y = top + h - v / 100 * h; t ? g.lineTo(x, y) : g.moveTo(x, y); }); g.stroke(); });
+  }
+  // events and notes of the main roast
+  if (main && opts.events && !compact) {
+    const sh = shift(main.r); g.font = '11px Inter, sans-serif'; g.textAlign = 'left';
+    Object.entries(main.r.events).forEach(([k, t]) => {
+      if (k === 'charge' || t == null) return; const x = X(t - sh), y = Y(main.r.bt[Math.min(t, main.r.bt.length - 1)]);
+      g.fillStyle = C.bt; g.beginPath(); g.arc(x, y, 3.5, 0, 7); g.fill();
+      g.fillStyle = 'rgba(255,255,255,.75)'; g.fillText(`${EVENT[k]} ${clock(t)}`, x + 6, y - 8);
+    });
+    main.r.notes.forEach(([t, text], i) => {
+      const x = X(t - sh); g.fillStyle = '#fff'; g.beginPath(); g.arc(x, pad.t + 9, 8, 0, 7); g.fill();
+      g.fillStyle = '#0b0c0e'; g.textAlign = 'center'; g.font = 'bold 10px Inter, sans-serif'; g.fillText(i + 1, x, pad.t + 12.5); g.textAlign = 'left';
+    });
+  }
+  // hover crosshair and card
+  const box = canvas.parentElement; let tip = box.querySelector('.tip');
+  if (cfg.hover && !compact) {
+    const t = Math.round(xmin + (cfg.hover.x - pad.l) / (W - pad.l - pad.r) * (xmax - xmin));
+    g.strokeStyle = 'rgba(255,255,255,.3)'; g.beginPath(); g.moveTo(X(t), pad.t); g.lineTo(X(t), plotB); g.stroke();
+    let rows = '';
+    series.forEach(s => {
+      const i = t + shift(s.r); const v = s.r.bt[i]; if (v == null) return;
+      g.fillStyle = s.single ? C.bt : s.color; g.beginPath(); g.arc(X(t), Y(v), 4, 0, 7); g.fill();
+      const ror = s.r.ror[i];
+      rows += `<div class="r"><span style="display:flex;gap:6px;align-items:center"><i class="swatch" style="background:${s.single ? C.bt : s.color}"></i>#${s.r.number}</span><span style="color:${C.bt}">${f1(v)}°</span><span style="color:${C.ror}">${f1(ror)}</span></div>`;
+      if (s.single) rows += `<div class="r" style="color:var(--dim)"><span>ET ${f1(s.r.et[i])}°</span><span style="color:${C.gas}">gas ${s.r.gas[i]}%</span><span style="color:${C.air}">air ${s.r.air[i]}%</span></div>`;
+    });
+    if (!tip) { tip = document.createElement('div'); tip.className = 'tip'; box.appendChild(tip); }
+    tip.hidden = !rows;
+    tip.innerHTML = `<div class="t">${opts.align === 'fc' ? (t < 0 ? 'FC −' : 'FC +') + clock(Math.abs(t)) : clock(t)}</div><div class="r" style="color:var(--faint);font-size:10px"><span>roast</span><span>BT</span><span>RoR</span></div>${rows}`;
+    const left = Math.min(cfg.hover.x + 16, W - 190); tip.style.left = Math.max(0, left) + 'px'; tip.style.top = Math.max(0, cfg.hover.y - 20) + 'px';
+  } else if (tip) tip.hidden = true;
+}
+new ResizeObserver(() => charts.forEach((_, c) => c.isConnected ? drawChart(c) : charts.delete(c))).observe(document.body);
+
+// Pieces several variants show: phases bar, figures, notes.
+function phasesHtml(r) {
+  const m = metrics(r);
+  return `<div style="display:grid;gap:8px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline"><span class="label">Phases</span><span class="mono" style="font-size:12px;color:var(--dim)">DTR <b style="color:var(--fg);font-size:15px">${m.dtr.toFixed(1)}%</b></span></div>
+    <div class="phases">${m.phases.map(([, d, col]) => `<div style="width:${d / m.total * 100}%;background:${col}aa"></div>`).join('')}</div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font:12px var(--mono)">${m.phases.map(([k, d]) => `<div><div style="font:11px var(--sans);color:var(--dim);text-transform:capitalize">${k}</div>${clock(d)}<div style="color:var(--faint)">${(d / m.total * 100).toFixed(0)}%</div></div>`).join('')}</div>
+  </div>`;
+}
+function figsHtml(r) {
+  const m = metrics(r);
+  const fig = (l, v, u, col) => `<div class="fig"><div class="label">${l}</div><span class="v" style="color:${col || 'var(--fg)'}">${v}</span><span class="u">${u || ''}</span></div>`;
+  return `<div class="figs">${fig('Total time', clock(m.total))}${fig('DTR', m.dtr.toFixed(1), '%', C.ror)}${fig('Development', clock(m.dev))}${fig('First crack', clock(m.fc))}${fig('Drop BT', f1(m.dropBt), '°C', C.bt)}${fig('Weight loss', m.loss.toFixed(1), '%')}</div>`;
+}
+function notesHtml(r) {
+  if (!r.notes.length) return `<div style="color:var(--faint);font-size:13px">No notes.</div>`;
+  return `<div class="notes">${r.notes.map(([t, text], i) => `<div class="note"><span class="when">${clock(t)}</span><span><b class="mono" style="color:var(--dim)">${i + 1}</b>&nbsp; ${text}</span></div>`).join('')}</div>`;
+}
+const coffeeOptions = sel => `<option value="all">All coffees</option>` + COFFEES.map(c => `<option value="${c.id}" ${sel === c.id ? 'selected' : ''}>${c.name} · lot ${c.lot}</option>`).join('');
+
+// ===== Variant A: Library (list on the left, one roast on the right, compare by ticking) ======
+function VariantA(root) {
+  const s = state.a;
+  const list = ROASTS.filter(r => (s.coffee === 'all' || r.coffee === s.coffee) && inRange(r, s.range) &&
+    (!s.q || `#${r.number} ${coffee(r.coffee).name} ${r.notes.map(n => n[1]).join(' ')}`.toLowerCase().includes(s.q.toLowerCase())));
+  const r = byId(s.sel) || list[0];
+  let rows = '', lastDay = '';
+  list.forEach(o => {
+    const day = dayLabel(o.date); if (day !== lastDay) { rows += `<div class="a-day">${day}</div>`; lastDay = day; }
+    const m = metrics(o), on = s.compare.has(o.id);
+    rows += `<div class="a-row ${o.id === r?.id ? 'sel' : ''}" data-id="${o.id}">
+      <input type="checkbox" data-cmp="${o.id}" ${on ? 'checked' : ''} title="Overlay on the chart" aria-label="Compare Roast #${o.number}">
+      <div><div class="t">Roast #${o.number} ${state.nextRef === o.id ? '<span class="star" title="Next roast reference">★</span>' : ''}</div><div class="s">${coffee(o.coffee).name} · ${timeLabel(o.date)}</div></div>
+      <div class="m">${clock(m.total)}<br>DTR ${m.dtr.toFixed(0)}%</div></div>`;
+  });
+  root.innerHTML = `
+    <aside class="a-list">
+      <div class="a-filters">
+        <select class="field" id="aCoffee" aria-label="Coffee">${coffeeOptions(s.coffee)}</select>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">${['7d', '30d', 'all'].map(k => `<button class="chip ${s.range === k ? 'on' : ''}" data-range="${k}">${k === 'all' ? 'All time' : 'Last ' + k.replace('d', ' days')}</button>`).join('')}</div>
+        <input class="field" id="aQ" placeholder="Search number, coffee or note" value="${s.q}">
+      </div>
+      <div class="a-rows">${rows || '<div class="empty">No roasts match.</div>'}</div>
+    </aside>
+    <section class="a-detail">${r ? `
+      <div class="a-head">
+        <h1>Roast #${r.number}</h1>
+        <span>${coffee(r.coffee).name} · lot ${coffee(r.coffee).lot}</span>
+        <span style="color:var(--dim)">${dayLabel(r.date)} ${timeLabel(r.date)} · ${r.roastedBy} · ${(r.green / 1000).toFixed(2)} → ${(r.roasted / 1000).toFixed(2)} kg</span>
+        <span style="margin-left:auto;display:flex;gap:8px">
+          ${r.ref ? `<button class="btn small" id="aRef">${s.compare.has(r.ref) ? 'Hide' : 'Show'} its reference (#${byId(r.ref).number})</button>` : ''}
+          <button class="btn ${state.nextRef === r.id ? '' : 'primary'} small" id="aUse">${state.nextRef === r.id ? '★ Next roast reference' : 'Use as reference for next roast'}</button>
+        </span>
+      </div>
+      <div style="padding:0 20px 6px" class="legend" id="aLegend"></div>
+      <div class="chartbox a-chart"><canvas id="aChart"></canvas></div>
+      <div class="a-under">
+        <div style="display:grid;gap:20px">${figsHtml(r)}${phasesHtml(r)}</div>
+        <div style="display:grid;gap:10px;align-content:start"><span class="label">Notes</span>${notesHtml(r)}</div>
+      </div>` : '<div class="empty">Pick a roast.</div>'}
+    </section>`;
+  root.querySelector('#aCoffee').onchange = e => { s.coffee = e.target.value; render(); };
+  root.querySelectorAll('[data-range]').forEach(b => b.onclick = () => { s.range = b.dataset.range; render(); });
+  const q = root.querySelector('#aQ'); q.oninput = e => { s.q = e.target.value; render(); const n = document.getElementById('aQ'); n.focus(); n.setSelectionRange(n.value.length, n.value.length); };
+  root.querySelectorAll('.a-row').forEach(el => el.onclick = ev => { if (ev.target.dataset.cmp) return; s.sel = el.dataset.id; render(); });
+  root.querySelectorAll('[data-cmp]').forEach(cb => cb.onchange = () => { cb.checked ? s.compare.add(cb.dataset.cmp) : s.compare.delete(cb.dataset.cmp); render(); });
+  if (!r) return;
+  root.querySelector('#aUse').onclick = () => setNextRef(r.id);
+  const refBtn = root.querySelector('#aRef'); if (refBtn) refBtn.onclick = () => { s.compare.has(r.ref) ? s.compare.delete(r.ref) : s.compare.add(r.ref); render(); };
+  const others = [...s.compare].filter(id => id !== r.id).map(byId);
+  const series = [{ r, single: others.length === 0, color: PALETTE[0], main: true }, ...others.map((o, i) => ({ r: o, color: PALETTE[(i + 1) % PALETTE.length], dash: [6, 4] }))];
+  root.querySelector('#aLegend').innerHTML = others.length
+    ? series.map(x => `<span><i class="swatch" style="background:${x.color}"></i>#${x.r.number} ${coffee(x.r.coffee).name}${x.main ? ' (this roast)' : ''}</span>`).join('') + '<span>solid BT · dotted RoR</span>'
+    : `<span><i class="swatch" style="background:${C.bt}"></i>BT</span><span><i class="swatch" style="background:${C.et}"></i>ET</span><span><i class="swatch" style="background:${C.ror}"></i>RoR</span><span>tick roasts on the left to overlay them</span>`;
+  chart(root.querySelector('#aChart'), series, { ror: true, et: others.length === 0, strip: others.length === 0, events: true });
+}
+
+// ===== Variant B: Compare table (metrics table first, ticked rows overlay in a big chart) =====
+function VariantB(root) {
+  const s = state.b;
+  const cols = [
+    ['number', '#', r => r.number, true], ['date', 'Date', r => r.date], ['coffee', 'Coffee', r => coffee(r.coffee).name],
+    ['total', 'Total', r => metrics(r).total, true, clock], ['fc', 'FC', r => metrics(r).fc, true, clock], ['dev', 'Dev', r => metrics(r).dev, true, clock],
+    ['dtr', 'DTR %', r => metrics(r).dtr, true, v => v.toFixed(1)], ['dropBt', 'Drop BT', r => metrics(r).dropBt, true, f1],
+    ['loss', 'Loss %', r => metrics(r).loss, true, v => v.toFixed(1)], ['swing', 'RoR swing', r => swing(r), true, v => v.toFixed(1)],
+  ];
+  const [sk, dir] = s.sort; const col = cols.find(c => c[0] === sk);
+  const list = ROASTS.filter(r => s.coffee === 'all' || r.coffee === s.coffee).sort((a, b) => { const x = col[2](a), y = col[2](b); return (x > y ? 1 : x < y ? -1 : 0) * dir; });
+  const picked = [...s.picked].map(byId).filter(Boolean);
+  const colorOf = id => PALETTE[[...s.picked].indexOf(id) % PALETTE.length];
+  const base = picked[0];
+  const delta = (k, fmt, unit = '') => picked.map(r => { const v = metrics(r)[k], d = base ? v - metrics(base)[k] : 0; return `<div><div class="label" style="display:flex;gap:6px;align-items:center"><i class="swatch" style="background:${colorOf(r.id)}"></i>#${r.number}</div><div class="mono" style="font-size:13px">${fmt(v)}${unit} ${r === base ? '' : `<span style="color:var(--dim)">${d >= 0 ? '+' : '−'}${fmt(Math.abs(d))}</span>`}</div></div>`; }).join('');
+  root.innerHTML = `<div class="b-wrap">
+    <div class="b-chartzone">
+      <div class="b-ctl">
+        <span class="label">Compare</span>
+        ${picked.map(r => `<span class="chip on" style="border-color:${colorOf(r.id)}66;background:${colorOf(r.id)}1a"><i class="swatch" style="background:${colorOf(r.id)}"></i>#${r.number} ${coffee(r.coffee).name.split(' ')[0]} <button class="chip" style="border:0;padding:0 2px" data-unpick="${r.id}" aria-label="Remove">✕</button></span>`).join('') || '<span style="color:var(--faint)">tick rows below (up to 6)</span>'}
+        <span style="margin-left:auto;display:flex;gap:6px;flex-wrap:wrap">
+          <button class="chip ${s.align === 'charge' ? 'on' : ''}" data-align="charge">Align on Charge</button>
+          <button class="chip ${s.align === 'fc' ? 'on' : ''}" data-align="fc">Align on First crack</button>
+          <button class="chip ${s.ror ? 'on' : ''}" id="bRor">RoR</button>
+          <button class="chip ${s.et ? 'on' : ''}" id="bEt">ET</button>
+        </span>
+      </div>
+      <div class="chartbox b-chart"><canvas id="bChart"></canvas></div>
+      ${picked.length > 1 ? `<div class="b-delta"><div><div class="label">vs #${base.number}</div><div style="font-size:12px;color:var(--dim)">first ticked</div></div>${delta('fc', clock)}</div>
+      <div class="b-delta" style="border-top:0">${['dtr', 'dropBt', 'loss'].map(k => `<div><div class="label">${{ dtr: 'DTR', dropBt: 'Drop BT', loss: 'Loss' }[k]}</div></div>` + delta(k, v => v.toFixed(1), k === 'dropBt' ? '°' : '%')).join('')}</div>` : ''}
+    </div>
+    <div class="b-tablezone">
+      <div style="display:flex;gap:10px;align-items:center;padding:10px 16px;flex-wrap:wrap">
+        <select class="field" id="bCoffee" aria-label="Coffee">${coffeeOptions(s.coffee)}</select>
+        <span style="color:var(--faint);font-size:12px">${list.length} roasts · click a column to sort · click # to open the roast</span>
+      </div>
+      <div style="overflow-x:auto"><table class="b"><thead><tr><th></th>${cols.map(c => `<th class="${c[3] ? 'num' : ''}" data-sort="${c[0]}">${c[1]}${sk === c[0] ? (dir > 0 ? ' ↑' : ' ↓') : ''}</th>`).join('')}<th>BT · RoR</th><th></th></tr></thead>
+      <tbody>${list.map(r => { const on = s.picked.has(r.id); return `<tr class="${on ? 'on' : ''}" data-pick="${r.id}">
+        <td><span class="b-check" style="${on ? `background:${colorOf(r.id)};border-color:${colorOf(r.id)}` : ''}"></span></td>
+        ${cols.map(c => { const v = c[2](r); return `<td class="${c[3] ? 'num mono' : ''}">${c[0] === 'number' ? `<button class="btn small" data-open="${r.id}">#${v}</button>` : c[0] === 'date' ? `${dayLabel(v)} ${timeLabel(v)}` : c[4] ? c[4](v) : v}${c[0] === 'swing' && v > 5 ? ' <span style="color:var(--danger)">●</span>' : ''}</td>`; }).join('')}
+        <td><canvas class="spark" data-spark="${r.id}"></canvas></td>
+        <td>${state.nextRef === r.id ? '<span class="star">★ ref</span>' : ''}</td></tr>`; }).join('')}</tbody></table></div>
+    </div></div>
+    ${s.drawer ? drawerHtml(byId(s.drawer)) : ''}`;
+  root.querySelector('#bCoffee').onchange = e => { s.coffee = e.target.value; render(); };
+  root.querySelectorAll('[data-sort]').forEach(th => th.onclick = () => { s.sort = [th.dataset.sort, s.sort[0] === th.dataset.sort ? -s.sort[1] : -1]; render(); });
+  root.querySelectorAll('[data-pick]').forEach(tr => tr.onclick = ev => { if (ev.target.closest('[data-open]')) return; const id = tr.dataset.pick; s.picked.has(id) ? s.picked.delete(id) : s.picked.size < 6 && s.picked.add(id); render(); });
+  root.querySelectorAll('[data-unpick]').forEach(b => b.onclick = () => { s.picked.delete(b.dataset.unpick); render(); });
+  root.querySelectorAll('[data-open]').forEach(b => b.onclick = () => { s.drawer = b.dataset.open; render(); });
+  root.querySelectorAll('[data-align]').forEach(b => b.onclick = () => { s.align = b.dataset.align; render(); });
+  root.querySelector('#bRor').onclick = () => { s.ror = !s.ror; render(); };
+  root.querySelector('#bEt').onclick = () => { s.et = !s.et; render(); };
+  chart(root.querySelector('#bChart'), picked.map((r, i) => ({ r, color: colorOf(r.id), main: i === 0 && picked.length === 1, single: false })), { ror: s.ror, et: s.et, align: s.align, events: picked.length === 1 });
+  root.querySelectorAll('[data-spark]').forEach(c => chart(c, [{ r: byId(c.dataset.spark), color: C.bt, single: true }], { compact: true, ror: true }));
+  if (s.drawer) {
+    const r = byId(s.drawer);
+    root.querySelector('#bClose').onclick = () => { s.drawer = null; render(); };
+    root.querySelector('#bUse').onclick = () => setNextRef(r.id);
+    chart(root.querySelector('#bDrawerChart'), [{ r, single: true, main: true }], { ror: true, et: true, strip: true, events: true });
+  }
+}
+function drawerHtml(r) {
+  return `<aside class="b-drawer" role="dialog" aria-label="Roast #${r.number}">
+    <div style="display:flex;align-items:center;gap:10px;padding:14px 20px;border-bottom:1px solid var(--line)">
+      <b style="font-size:18px">Roast #${r.number}</b><span style="color:var(--dim)">${coffee(r.coffee).name}</span>
+      <button class="btn small" id="bClose" style="margin-left:auto">Close</button></div>
+    <div class="in">
+      <div style="color:var(--dim);font-size:13px">${dayLabel(r.date)} ${timeLabel(r.date)} · ${r.roastedBy} · ${(r.green / 1000).toFixed(2)} → ${(r.roasted / 1000).toFixed(2)} kg${r.ref ? ` · reference #${byId(r.ref).number}` : ''}</div>
+      <div class="chartbox" style="height:300px"><canvas id="bDrawerChart"></canvas></div>
+      ${figsHtml(r)}${phasesHtml(r)}<div style="display:grid;gap:8px"><span class="label">Notes</span>${notesHtml(r)}</div>
+      <button class="btn ${state.nextRef === r.id ? '' : 'primary'}" id="bUse">${state.nextRef === r.id ? '★ Next roast reference' : 'Use as reference for next roast'}</button>
+    </div></aside>`;
+}
+
+// ===== Variant C: By coffee (pick the coffee, roasts as small multiples, detail vs its reference) =====
+function VariantC(root) {
+  const s = state.c;
+  const roasts = ROASTS.filter(r => r.coffee === s.coffee);
+  const refId = state.nextRef && byId(state.nextRef).coffee === s.coffee ? state.nextRef : null;
+  const open = s.open ? byId(s.open) : null;
+  root.innerHTML = `
+    <aside class="c-coffees">${COFFEES.map(c => { const rs = ROASTS.filter(r => r.coffee === c.id); const best = state.nextRef && byId(state.nextRef).coffee === c.id;
+      return `<div class="c-coffee ${s.coffee === c.id ? 'sel' : ''}" data-coffee="${c.id}"><span class="n">${c.name}</span><span class="s">lot ${c.lot} · ${rs.length} roasts · last ${dayLabel(rs[0].date)}</span>${best ? `<span class="s star">★ next roast follows #${byId(state.nextRef).number}</span>` : ''}</div>`; }).join('')}</aside>
+    <section class="c-main">${open ? detailC(open, roasts, refId) : `
+      <div style="display:flex;align-items:baseline;gap:12px;flex-wrap:wrap"><h1 style="margin:0;font-size:22px">${coffee(s.coffee).name}</h1><span style="color:var(--dim)">lot ${coffee(s.coffee).lot} · ${roasts.length} roasts, newest first</span></div>
+      <div class="c-grid">${roasts.map(r => { const m = metrics(r); return `<button class="c-card ${refId === r.id ? 'ref' : ''}" data-open="${r.id}">
+        <div class="row"><b style="color:var(--fg)">#${r.number} ${refId === r.id ? '<span class="star">★</span>' : ''}</b><span>${dayLabel(r.date)}</span></div>
+        <canvas data-thumb="${r.id}"></canvas>
+        <div class="row mono"><span>${clock(m.total)}</span><span>FC ${clock(m.fc)}</span><span>DTR ${m.dtr.toFixed(0)}%</span><span>${m.loss.toFixed(1)}%</span></div>
+        ${r.notes.length ? `<div style="font-size:12px;color:var(--dim);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">“${r.notes.at(-1)[1]}”</div>` : ''}</button>`; }).join('')}</div>`}
+    </section>`;
+  root.querySelectorAll('[data-coffee]').forEach(el => el.onclick = () => { s.coffee = el.dataset.coffee; s.open = null; render(); });
+  root.querySelectorAll('[data-open]').forEach(el => el.onclick = () => { s.open = el.dataset.open; render(); });
+  root.querySelectorAll('[data-thumb]').forEach(c => chart(c, [{ r: byId(c.dataset.thumb), single: true }], { compact: true, ror: true }));
+  if (!open) return;
+  const i = roasts.indexOf(open);
+  root.querySelector('#cBack').onclick = () => { s.open = null; render(); };
+  root.querySelector('#cPrev').onclick = () => { if (roasts[i + 1]) { s.open = roasts[i + 1].id; render(); } };
+  root.querySelector('#cNext').onclick = () => { if (roasts[i - 1]) { s.open = roasts[i - 1].id; render(); } };
+  root.querySelector('#cUse').onclick = () => setNextRef(open.id);
+  root.querySelectorAll('[data-against]').forEach(b => b.onclick = () => { s.against = b.dataset.against; render(); });
+  const other = againstC(open, roasts, refId);
+  chart(root.querySelector('#cChart'), [{ r: open, color: PALETTE[0], main: true, single: !other }, ...(other ? [{ r: other, color: 'rgba(255,255,255,.55)', dash: [6, 4] }] : [])], { ror: true, et: !other, strip: true, events: true });
+}
+function againstC(r, roasts, refId) {
+  const s = state.c;
+  if (s.against === 'ref') return refId && refId !== r.id ? byId(refId) : null;
+  if (s.against === 'prev') return roasts[roasts.indexOf(r) + 1] || null;
+  return null;
+}
+function detailC(r, roasts, refId) {
+  const s = state.c, other = againstC(r, roasts, refId), m = metrics(r), o = other && metrics(other);
+  const row = (l, a, b, fmt, unit = '') => `<span style="color:var(--dim)">${l}</span><span>${fmt(a)}${unit}</span><span style="color:var(--dim)">${o ? fmt(b) + unit : ''}</span><span>${o ? `${a - b >= 0 ? '+' : '−'}${fmt(Math.abs(a - b))}` : ''}</span>`;
+  const i = roasts.indexOf(r);
+  return `<div class="c-detail">
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn small" id="cBack">← ${coffee(r.coffee).name}</button>
+      <button class="btn small" id="cPrev" ${roasts[i + 1] ? '' : 'disabled'}>‹ older</button><button class="btn small" id="cNext" ${roasts[i - 1] ? '' : 'disabled'}>newer ›</button>
+      <h1 style="margin:0 0 0 6px;font-size:22px">Roast #${r.number}</h1><span style="color:var(--dim)">${dayLabel(r.date)} ${timeLabel(r.date)} · ${r.roastedBy}</span>
+      <button class="btn ${refId === r.id ? '' : 'primary'} small" id="cUse" style="margin-left:auto">${refId === r.id ? '★ Best of this coffee (next reference)' : '★ Mark as best: next reference'}</button>
+    </div>
+    <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center"><span class="label">Against</span>
+      <button class="chip ${s.against === 'ref' ? 'on' : ''}" data-against="ref">Best of this coffee${refId ? ` (#${byId(refId).number})` : ' (none yet)'}</button>
+      <button class="chip ${s.against === 'prev' ? 'on' : ''}" data-against="prev">Previous roast</button>
+      <button class="chip ${s.against === 'none' ? 'on' : ''}" data-against="none">Nothing</button>
+      ${other ? `<span class="legend" style="margin-left:8px"><span><i class="swatch" style="background:${PALETTE[0]}"></i>#${r.number}</span><span><i class="swatch" style="background:rgba(255,255,255,.55)"></i>#${other.number} dashed</span></span>` : ''}
+    </div>
+    <div class="chartbox c-chart"><canvas id="cChart"></canvas></div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:24px">
+      <div class="c-vs"><span></span><span class="h">#${r.number}</span><span class="h">${o ? '#' + other.number : ''}</span><span class="h">${o ? 'diff' : ''}</span>
+        ${row('Total', m.total, o?.total, clock)}${row('First crack', m.fc, o?.fc, clock)}${row('Development', m.dev, o?.dev, clock)}
+        ${row('DTR', m.dtr, o?.dtr, v => v.toFixed(1), '%')}${row('Drop BT', m.dropBt, o?.dropBt, v => v.toFixed(1), '°')}${row('Weight loss', m.loss, o?.loss, v => v.toFixed(1), '%')}
+        ${row('RoR swing', swing(r), other ? swing(other) : 0, v => v.toFixed(1))}</div>
+      <div style="display:grid;gap:16px;align-content:start">${phasesHtml(r)}<div style="display:grid;gap:8px"><span class="label">Notes</span>${notesHtml(r)}</div></div>
+    </div></div>`;
+}
+
+// ===== Switcher (prototype scaffolding) ====================================================
+const VARIANTS = [['a', 'Library', VariantA], ['b', 'Compare table', VariantB], ['c', 'By coffee', VariantC]];
+function render() {
+  const v = VARIANTS.find(x => x[0] === state.variant) || VARIANTS[0];
+  charts.clear();
+  document.getElementById('vname').textContent = `${v[0].toUpperCase()} · ${v[1]}`;
+  nextRefLine();
+  v[2](document.getElementById('view'));
+}
+function go(step) { const i = VARIANTS.findIndex(x => x[0] === state.variant); state.variant = VARIANTS[(i + step + VARIANTS.length) % VARIANTS.length][0]; history.replaceState(null, '', '#' + state.variant); render(); }
+document.getElementById('prev').onclick = () => go(-1);
+document.getElementById('next').onclick = () => go(1);
+document.addEventListener('keydown', e => { if (e.target.closest('input, textarea, select, [contenteditable]')) return; if (e.key === 'ArrowLeft') go(-1); if (e.key === 'ArrowRight') go(1); });
+const fromHash = () => { const h = location.hash.slice(1); if (VARIANTS.some(x => x[0] === h)) state.variant = h; };
+window.addEventListener('hashchange', () => { fromHash(); render(); });
+fromHash(); render();
+</script>
