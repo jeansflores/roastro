@@ -311,6 +311,7 @@ mod tests {
                 development_time_ratio: None,
                 weight_loss_ratio: None,
             },
+            summary: None,
         }
     }
 

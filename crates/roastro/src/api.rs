@@ -18,10 +18,11 @@ use store::RoastId;
 use tokio::sync::{broadcast, mpsc, oneshot};
 use uuid::Uuid;
 
+use crate::Millis;
 use crate::engine::{Edit, Reply, Request};
 use crate::wire::{
     CoffeeIn, CoffeeOut, CoffeePatch, Columns, EventIn, NextRoastIn, NextRoastOut, NoteIn, NoteOut,
-    NotePatch, RoastDoc, RoastPage, RoastPatchIn,
+    NotePatch, RoastDoc, RoastPage, RoastPatchIn, RoastQueryIn,
 };
 
 /// An API error: an HTTP status and `{ "error": { "code", "message" } }`.
@@ -275,19 +276,33 @@ async fn samples(
 struct ListQuery {
     before: Option<String>,
     include: Option<String>,
+    coffee: Option<String>,
+    since: Option<Millis>,
+    until: Option<Millis>,
+    q: Option<String>,
 }
 
 async fn roasts(
     State(app): State<AppState>,
     Query(q): Query<ListQuery>,
 ) -> Result<Json<RoastPage>, ApiError> {
-    let before = q
-        .before
-        .as_deref()
-        .map(|b| parse_id(b, "roast"))
-        .transpose()?;
-    let discarded = q.include.as_deref() == Some("discarded");
-    app.ask(|r| Request::Edit(Edit::Roasts(before, discarded, r)))
+    let query = RoastQueryIn {
+        before: q
+            .before
+            .as_deref()
+            .map(|b| parse_id(b, "roast"))
+            .transpose()?,
+        discarded: q.include.as_deref() == Some("discarded"),
+        coffee: q
+            .coffee
+            .as_deref()
+            .map(|c| parse_id(c, "coffee"))
+            .transpose()?,
+        since: q.since,
+        until: q.until,
+        q: q.q,
+    };
+    app.ask(|r| Request::Edit(Edit::Roasts(query, r)))
         .await
         .map(Json)
 }

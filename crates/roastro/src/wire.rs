@@ -136,6 +136,20 @@ pub struct RoastDoc {
     pub events: Vec<EventOut>,
     pub notes: Vec<NoteOut>,
     pub metrics: MetricsOut,
+    /// Figures read from the samples, for listings and the detail; only on a
+    /// finished roast, and only where the engine was asked for them.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary: Option<SummaryOut>,
+}
+
+/// What a finished roast's samples say, beyond its events.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub struct SummaryOut {
+    /// Bean temperature at Drop, °C.
+    pub drop_bt: Option<f64>,
+    /// The largest fall of the `RoR` within 30 s between Turning point and
+    /// Drop, °C/min: a crash or a swing.
+    pub ror_fall: Option<f64>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -269,6 +283,7 @@ impl RoastDoc {
                 development_time_ratio: m.development_time_ratio,
                 weight_loss_ratio: m.weight_loss_ratio,
             },
+            summary: None,
         })
     }
 }
@@ -439,6 +454,25 @@ pub struct CoffeeIn {
 pub struct CoffeePatch {
     pub name: Option<String>,
     pub archived: Option<bool>,
+}
+
+/// `GET /api/roasts` query: which roasts a page lists. The default lists
+/// every roast not discarded, newest first.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
+pub struct RoastQueryIn {
+    /// The next page: roasts older than this one.
+    pub before: Option<Uuid>,
+    /// Discarded roasts too.
+    #[serde(default)]
+    pub discarded: bool,
+    /// Only this coffee's roasts.
+    pub coffee: Option<Uuid>,
+    /// Charged at or after (epoch ms).
+    pub since: Option<Millis>,
+    /// Charged before (epoch ms).
+    pub until: Option<Millis>,
+    /// A roast number, or text in its notes or coffee name.
+    pub q: Option<String>,
 }
 
 /// `GET /api/roasts`: a page of roasts, newest first.

@@ -22,7 +22,7 @@ use uuid::Uuid;
 
 mod edit;
 
-pub use edit::{Coffee, RoastPatch};
+pub use edit::{Coffee, RoastPatch, RoastQuery};
 
 /// The migrations, in order. Never edit one that has shipped; add a new one.
 const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_initial.sql")];

@@ -37,6 +37,23 @@ pub struct Coffee {
     pub archived: bool,
 }
 
+/// Which roasts a listing shows. The default lists every roast not discarded.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RoastQuery {
+    /// Only roasts older than this one (the next page).
+    pub before: Option<RoastId>,
+    /// Discarded roasts too.
+    pub include_discarded: bool,
+    /// Only this coffee's roasts.
+    pub coffee_id: Option<Uuid>,
+    /// Charged at or after this instant.
+    pub since: Option<Millis>,
+    /// Charged before this instant.
+    pub until: Option<Millis>,
+    /// The roast's number, or text in its notes or its coffee's name.
+    pub text: Option<String>,
+}
+
 impl Store {
     fn ensure_roast(&self, id: RoastId) -> Result<()> {
         let exists: bool = self.conn.query_row(
@@ -318,31 +335,53 @@ impl Store {
         self.coffee(id)
     }
 
-    /// Roasts newest first, `limit` at a time, older than `before` if given;
-    /// discarded ones only if asked.
+    /// Roasts newest first, `limit` at a time, as the query narrows them.
     ///
     /// # Errors
     ///
     /// Fails on a database error.
-    pub fn roasts(
-        &self,
-        before: Option<RoastId>,
-        include_discarded: bool,
-        limit: usize,
-    ) -> Result<Vec<Roast>> {
+    pub fn roasts(&self, query: &RoastQuery, limit: usize) -> Result<Vec<Roast>> {
         let limit = i64::try_from(limit).unwrap_or(i64::MAX);
+        let text = query
+            .text
+            .as_deref()
+            .map(str::trim)
+            .filter(|t| !t.is_empty())
+            .map(|t| t.trim_start_matches('#').to_owned());
+        let like = text.as_deref().map(|t| {
+            let escaped = t
+                .replace('\\', "\\\\")
+                .replace('%', "\\%")
+                .replace('_', "\\_");
+            format!("%{escaped}%")
+        });
         let mut stmt = self.conn.prepare(
-            "SELECT id FROM roast
-             WHERE machine_id = ?1
-               AND (?2 IS NULL OR number < (SELECT number FROM roast WHERE id = ?2))
-               AND (?3 OR discarded_at IS NULL)
-             ORDER BY number DESC LIMIT ?4",
+            "SELECT r.id FROM roast r
+             LEFT JOIN roast_event c ON c.roast_id = r.id AND c.kind = 'charge'
+             WHERE r.machine_id = ?1
+               AND (?2 IS NULL OR r.number < (SELECT number FROM roast WHERE id = ?2))
+               AND (?3 OR r.discarded_at IS NULL)
+               AND (?4 IS NULL OR r.coffee_id = ?4)
+               AND (?5 IS NULL OR c.at >= ?5)
+               AND (?6 IS NULL OR c.at < ?6)
+               AND (?7 IS NULL
+                    OR CAST(r.number AS TEXT) = ?8
+                    OR EXISTS (SELECT 1 FROM roast_note n
+                               WHERE n.roast_id = r.id AND n.text LIKE ?7 ESCAPE '\\')
+                    OR EXISTS (SELECT 1 FROM coffee k
+                               WHERE k.id = r.coffee_id AND k.name LIKE ?7 ESCAPE '\\'))
+             ORDER BY r.number DESC LIMIT ?9",
         )?;
         let ids = stmt.query_map(
             params![
                 self.machine_id.to_string(),
-                before.map(|b| b.to_string()),
-                include_discarded,
+                query.before.map(|b| b.to_string()),
+                query.include_discarded,
+                query.coffee_id.map(|c| c.to_string()),
+                query.since,
+                query.until,
+                like,
+                text,
                 limit
             ],
             |r| r.get::<_, String>(0),

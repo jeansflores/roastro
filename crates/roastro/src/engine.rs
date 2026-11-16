@@ -18,13 +18,16 @@ use crate::api::ApiError;
 use crate::record::Recording;
 use crate::wire::{
     CoffeeIn, CoffeeOut, CoffeePatch, Columns, EventIn, Link, LinkState, Live, NextRoastIn,
-    NextRoastOut, NoteIn, NoteOut, NotePatch, RoastDoc, RoastPage, RoastPatchIn, RorSettings,
-    SampleOut, Snapshot, samples_with_ror,
+    NextRoastOut, NoteIn, NoteOut, NotePatch, RoastDoc, RoastPage, RoastPatchIn, RoastQueryIn,
+    RorSettings, SampleOut, Snapshot, SummaryOut, samples_with_ror,
 };
 use uuid::Uuid;
 
 /// Readings kept for the live screen while waiting for Charge.
 const PRE_CHARGE: Duration = Duration::from_secs(60);
+
+/// The span over which a falling `RoR` counts as a crash or a swing.
+const RAPID_FALL: Duration = Duration::from_secs(30);
 
 /// The live stream as received by one subscriber.
 pub type LiveReceiver = broadcast::Receiver<Arc<Live>>;
@@ -88,7 +91,7 @@ pub enum Edit {
     /// Rename or archive a coffee.
     PatchCoffee(Uuid, CoffeePatch, Reply<CoffeeOut>),
     /// A page of roasts.
-    Roasts(Option<Uuid>, bool, Reply<RoastPage>),
+    Roasts(RoastQueryIn, Reply<RoastPage>),
 }
 
 /// The engine's state. Lives on its own thread; see [`Engine::run`].
@@ -183,7 +186,7 @@ impl Engine {
                 let _ = reply.send(result);
             }
             Request::Roast(id, reply) => {
-                let _ = reply.send(self.doc(id));
+                let _ = reply.send(self.summarized(id));
             }
             Request::Samples(id, reply) => {
                 let _ = reply.send(self.columns(id));
@@ -331,6 +334,39 @@ impl Engine {
         })
     }
 
+    /// The roast with the figures read from its samples, once it is over.
+    fn summarized(&self, id: RoastId) -> Result<RoastDoc, ApiError> {
+        let mut doc = self.doc(id)?;
+        if doc.state == "recording" {
+            return Ok(doc);
+        }
+        let samples = self
+            .recording
+            .store()
+            .samples(id)
+            .map_err(ApiError::internal)?;
+        let bt: Vec<(Millis, Option<f64>)> = samples
+            .iter()
+            .map(|s| (s.at, s.values.get("bt").copied()))
+            .collect();
+        let at = |kind: &str| doc.events.iter().find(|e| e.kind == kind).map(|e| e.at);
+        let drop = at("drop");
+        let drop_bt = drop.and_then(|d| {
+            bt.iter()
+                .rev()
+                .find(|(t, v)| *t <= d && v.is_some())
+                .and_then(|(_, v)| *v)
+        });
+        let ror = roast::ror_series(&bt, self.ror.window, self.ror.gap, self.ror.time_scale);
+        let ror: Vec<(Millis, Option<f64>)> = bt.iter().map(|(t, _)| *t).zip(ror).collect();
+        let end = drop.or_else(|| bt.last().map(|(t, _)| *t));
+        let ror_fall = at("turning_point")
+            .zip(end)
+            .and_then(|(from, to)| roast::largest_fall(&ror, RAPID_FALL, from, to));
+        doc.summary = Some(SummaryOut { drop_bt, ror_fall });
+        Ok(doc)
+    }
+
     fn doc(&self, id: RoastId) -> Result<RoastDoc, ApiError> {
         RoastDoc::load(self.recording.store(), id, (self.now)()).map_err(|e| match e {
             store::Error::NoRoast(_) => {
@@ -378,7 +414,7 @@ mod tests {
     use store::Store;
 
     use super::*;
-    use crate::wire::{CoffeeIn, EventIn, NextRoastIn, NoteIn, RoastPatchIn};
+    use crate::wire::{CoffeeIn, EventIn, NextRoastIn, NoteIn, RoastPatchIn, RoastQueryIn};
 
     thread_local! {
         /// A clock the tests move by hand, one per test thread so tests
@@ -429,6 +465,58 @@ mod tests {
                     .to_owned()
             })
             .collect()
+    }
+
+    #[test]
+    fn lists_finished_roasts_with_what_their_samples_say() {
+        let (mut e, _rx) = engine();
+        for s in 0..5 {
+            poll(&mut e, s, 200.0);
+        }
+        let id = RoastId(ask(&mut e, Request::Charge).unwrap().id);
+        // Down to a turning point at 90 °C, up at 0.4 °C/s (24 °C/min), then
+        // flat for 40 s: the RoR crashes by 24 °C/min within 30 s.
+        let mut bt = 200.0;
+        for s in 5..200 {
+            bt = match s {
+                5..60 => bt - 2.0,
+                60..150 => bt + 0.4,
+                _ => bt,
+            };
+            poll(&mut e, s, bt);
+        }
+        ask(&mut e, Request::Drop).unwrap();
+        assert!(
+            ask(&mut e, |r| Request::Roast(id, r))
+                .unwrap()
+                .events
+                .iter()
+                .any(|e| e.kind == "turning_point"),
+            "the turning point is computed"
+        );
+
+        let doc = ask(&mut e, |r| Request::Roast(id, r)).unwrap();
+        let summary = doc.summary.expect("a finished roast is summarized");
+        assert!((summary.drop_bt.unwrap() - bt).abs() < 1e-6, "BT at Drop");
+        let fall = summary.ror_fall.unwrap();
+        assert!(fall > 20.0, "the crash shows: {fall}");
+
+        let mut page = |q: &str| {
+            edit(&mut e, |r| {
+                Edit::Roasts(
+                    RoastQueryIn {
+                        q: Some(q.into()),
+                        ..RoastQueryIn::default()
+                    },
+                    r,
+                )
+            })
+            .unwrap()
+            .roasts
+            .len()
+        };
+        assert_eq!(page("#1"), 1);
+        assert_eq!(page("#2"), 0);
     }
 
     #[test]
@@ -653,11 +741,11 @@ mod tests {
             "the coffee's latest Done roast"
         );
 
-        let page = edit(&mut e, |r| Edit::Roasts(None, false, r)).unwrap();
+        let page = edit(&mut e, |r| Edit::Roasts(RoastQueryIn::default(), r)).unwrap();
         assert_eq!((page.roasts.len(), page.next_before), (1, None));
         edit(&mut e, |r| Edit::Discard(id, r)).unwrap();
         assert_eq!(
-            edit(&mut e, |r| Edit::Roasts(None, false, r))
+            edit(&mut e, |r| Edit::Roasts(RoastQueryIn::default(), r))
                 .unwrap()
                 .roasts
                 .len(),

@@ -9,7 +9,7 @@ use gpui_kit::component::select::{Select, SelectEvent, SelectItem, SelectState};
 use gpui_kit::prelude::*;
 use gpui_kit::{Context, Entity, IntoElement, SharedString, Subscription, Window, div, px};
 use roastro::engine::{Edit, Request};
-use roastro::wire::{CoffeeIn, CoffeeOut, Live, NextRoastIn, NextRoastOut, RoastDoc};
+use roastro::wire::{CoffeeIn, CoffeeOut, Live, NextRoastIn, NextRoastOut, RoastDoc, RoastQueryIn};
 use uuid::Uuid;
 
 use super::rail::label;
@@ -192,7 +192,7 @@ impl RoastScreen {
                 .ok()?
                 .ok()?;
             let page = engine
-                .ask(|r| Request::Edit(Edit::Roasts(None, false, r)))?
+                .ask(|r| Request::Edit(Edit::Roasts(RoastQueryIn::default(), r)))?
                 .await
                 .ok()?
                 .ok()?;

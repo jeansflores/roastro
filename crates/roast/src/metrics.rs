@@ -156,6 +156,38 @@ pub fn ror_series(
         .collect()
 }
 
+/// The largest fall of a series over `window`, among the readings from `from`
+/// to `to`: the `RoR` crash or swing the roaster looks for after a
+/// disappointing cupping (a `RoR` dropping by more than a few °C/min within
+/// 30 s). `None` when no pair of readings `window` apart has both values.
+#[must_use]
+pub fn largest_fall(
+    series: &[(Millis, Option<f64>)],
+    window: Duration,
+    from: Millis,
+    to: Millis,
+) -> Option<f64> {
+    let window = Millis::try_from(window.as_millis()).unwrap_or(Millis::MAX);
+    let inside: Vec<(Millis, f64)> = series
+        .iter()
+        .filter(|(at, _)| (from..=to).contains(at))
+        .filter_map(|&(at, v)| Some((at, v?)))
+        .collect();
+    let mut later = 0;
+    let mut largest: Option<f64> = None;
+    for &(at, v) in &inside {
+        while later < inside.len() && inside[later].0 < at + window {
+            later += 1;
+        }
+        let Some(&(_, then)) = inside.get(later) else {
+            break;
+        };
+        let fall = v - then;
+        largest = Some(largest.map_or(fall, |l| l.max(fall)));
+    }
+    largest
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -223,5 +255,27 @@ mod tests {
         assert!((ror[60].unwrap() - 12.0).abs() < 1e-9);
         assert_eq!(ror[61], None, "restarted after the Gap");
         assert!(ror[62].is_some());
+    }
+
+    #[test]
+    fn finds_the_largest_fall_within_the_window() {
+        let s = 1000;
+        // RoR 20 → 18 slowly, then a crash 18 → 11 at 60–90 s, then a flick.
+        let series: Vec<(Millis, Option<f64>)> = [20.0, 19.0, 18.0, 11.0, 14.0, 13.0]
+            .iter()
+            .enumerate()
+            .map(|(i, &v)| (Millis::try_from(i).unwrap() * 30 * s, Some(v)))
+            .collect();
+        let fall = largest_fall(&series, Duration::from_secs(30), 0, 200 * s).unwrap();
+        assert!((fall - 7.0).abs() < 1e-9, "{fall}");
+        assert_eq!(
+            largest_fall(&series, Duration::from_secs(30), 100 * s, 200 * s),
+            Some(1.0),
+            "only readings in range"
+        );
+        assert_eq!(
+            largest_fall(&series[..1], Duration::from_secs(30), 0, 200 * s),
+            None
+        );
     }
 }

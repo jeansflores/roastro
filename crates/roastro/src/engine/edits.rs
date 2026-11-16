@@ -13,7 +13,7 @@ use super::{Edit, Engine};
 use crate::api::ApiError;
 use crate::wire::{
     CoffeeIn, CoffeeOut, CoffeePatch, Live, NextRoastIn, NextRoastOut, NoteIn, NoteOut, NotePatch,
-    RoastDoc, RoastPage, RoastPatchIn,
+    RoastDoc, RoastPage, RoastPatchIn, RoastQueryIn,
 };
 
 /// Roasts per page of `GET /api/roasts`.
@@ -69,8 +69,8 @@ impl Engine {
             Edit::PatchCoffee(id, body, reply) => {
                 let _ = reply.send(self.patch_coffee(id, &body));
             }
-            Edit::Roasts(before, discarded, reply) => {
-                let _ = reply.send(self.roast_page(before, discarded));
+            Edit::Roasts(query, reply) => {
+                let _ = reply.send(self.roast_page(query));
             }
         }
     }
@@ -394,18 +394,26 @@ impl Engine {
         }
     }
 
-    fn roast_page(&self, before: Option<Uuid>, discarded: bool) -> Result<RoastPage, ApiError> {
+    fn roast_page(&self, q: RoastQueryIn) -> Result<RoastPage, ApiError> {
+        let query = store::RoastQuery {
+            before: q.before.map(RoastId),
+            include_discarded: q.discarded,
+            coffee_id: q.coffee,
+            since: q.since,
+            until: q.until,
+            text: q.q,
+        };
         let roasts = self
             .recording
             .store()
-            .roasts(before.map(RoastId), discarded, PAGE)
+            .roasts(&query, PAGE)
             .map_err(ApiError::internal)?;
         let next_before = (roasts.len() == PAGE)
             .then(|| roasts.last().map(|r| r.id.0))
             .flatten();
         let roasts = roasts
             .into_iter()
-            .map(|r| self.doc(r.id))
+            .map(|r| self.summarized(r.id))
             .collect::<Result<_, _>>()?;
         Ok(RoastPage {
             roasts,
