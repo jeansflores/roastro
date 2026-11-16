@@ -17,13 +17,13 @@ Roasting software for a Carmomaq Caloratto 5 kg roaster that speaks Modbus TCP. 
 Cargo workspace at the root:
 
 ```
-crates/roast     roast vocabulary (event kinds, sources) and pure calculations (RoR, ...)
+crates/roast     roast vocabulary (event kinds, sources) and pure calculations (RoR, metrics: phases, DTR, weight loss)
 crates/recorder  pure lifecycle state machine: readings in, roasts out (Charge/Drop detection, turning point, lead-in, tail, Gaps)
 crates/store     SQLite: schema, embedded migrations on PRAGMA user_version, the roast record
 crates/regmap    register map loading, validation, encode/decode
 crates/machine   machine facts from the manual (fan % → m³/h, drum % → rpm)
 crates/plc       async Modbus client by point name (timeouts, reconnect, loopback-only writes) and poller with backoff
-crates/roastro   the app: polls the PLC, records every roast (recorder + store); API and web UI to come
+crates/roastro   the app: an engine thread owns recorder + store; axum API and live WebSocket on 127.0.0.1:8000 (Origin-checked, no PLC writes); web UI to come
 crates/sim       PLC simulator: thermal model, interlocks, autopilot; binary serves Modbus TCP :5502 + HTTP panel :8080 on loopback
 crates/probe     line-based Modbus client (read, CSV, one-off writes)
 crates/monitor   terminal dashboard (ratatui) with live readings and keyboard commands

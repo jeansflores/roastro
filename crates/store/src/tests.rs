@@ -156,3 +156,16 @@ fn rejects_what_the_schema_forbids() {
     };
     assert!(st.set_next_roast(&bad).is_err(), "a zero weight");
 }
+
+#[test]
+fn reads_coffee_names_and_notes() {
+    let mut st = Store::open_in_memory().unwrap();
+    let coffee = st.add_coffee("Catuaí Vermelho").unwrap();
+    assert_eq!(
+        st.coffee_name(coffee).unwrap().as_deref(),
+        Some("Catuaí Vermelho")
+    );
+    assert_eq!(st.coffee_name(Uuid::now_v7()).unwrap(), None);
+    let id = st.start_roast(0, Source::Manual, &[]).unwrap();
+    assert_eq!(st.notes(id).unwrap(), []);
+}

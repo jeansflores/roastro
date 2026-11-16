@@ -1,5 +1,5 @@
-//! The Roastro app. For now it reads the PLC once a second and records every
-//! roast in the database; the API and the web UI come next.
+//! The Roastro app: reads the PLC once a second, records every roast, and
+//! serves the API and the live stream to the web UI on this machine only.
 //!
 //! ```text
 //! make run-sim SPEED=10                              # in one terminal
@@ -8,8 +8,12 @@
 //!
 //! The app never writes to the PLC: v1 only reads and records.
 
+mod api;
+mod engine;
 mod record;
+mod wire;
 
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -17,16 +21,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Context as _;
 use clap::Parser;
 use plc::{Client, Config, Poller};
-use recorder::{Input, Millis, Rules, Sample};
+use recorder::{Millis, Rules};
 use regmap::Map;
 use store::Store;
+use tokio::sync::{broadcast, mpsc};
 
+use crate::engine::{Engine, Request};
 use crate::record::Recording;
+use crate::wire::RorSettings;
 
 // Doc comments here are the --help text, so they stay plain prose.
 #[allow(clippy::doc_markdown)]
 #[derive(Debug, Parser)]
-#[command(about = "Roastro: reads the roaster PLC and records every roast")]
+#[command(about = "Roastro: reads the roaster PLC, records every roast and serves the UI")]
 struct Args {
     /// PLC address (real machine: tcp://192.168.5.11:502).
     #[arg(long, default_value = "tcp://127.0.0.1:5502")]
@@ -37,6 +44,13 @@ struct Args {
     /// Database file (default: Roastro/roastro.db in the local app data folder).
     #[arg(long)]
     db: Option<PathBuf>,
+    /// Address for the API and the UI. Loopback only: remote access is not part of v1.
+    #[arg(long, default_value = "127.0.0.1:8000")]
+    http: SocketAddr,
+    /// Another page origin allowed to use the API, e.g. the UI's dev server
+    /// (http://localhost:5173). Repeatable.
+    #[arg(long)]
+    allow_origin: Vec<String>,
     /// Polling interval in milliseconds.
     #[arg(long, default_value_t = 1000)]
     interval_ms: u64,
@@ -71,6 +85,10 @@ async fn main() -> anyhow::Result<()> {
         args.time_scale > 0.0 && args.time_scale.is_finite(),
         "--time-scale must be positive"
     );
+    anyhow::ensure!(
+        args.http.ip().to_canonical().is_loopback(),
+        "--http must be a loopback address: remote access is not part of v1"
+    );
 
     let db = match args.db {
         Some(path) => path,
@@ -85,7 +103,7 @@ async fn main() -> anyhow::Result<()> {
         time_scale: args.time_scale,
         ..Rules::default()
     };
-    let mut recording = Recording::open(store, rules)?;
+    let recording = Recording::open(store, rules)?;
 
     let map =
         Arc::new(Map::load(&args.map).with_context(|| format!("loading {}", args.map.display()))?);
@@ -101,28 +119,49 @@ async fn main() -> anyhow::Result<()> {
     .run(client);
     tracing::info!(url = %args.url, "reading the PLC");
 
-    // SQLite is synchronous: the recording loop owns the database on its own thread.
-    let recorder = std::thread::spawn(move || -> anyhow::Result<()> {
-        while let Some(ev) = polls.blocking_recv() {
-            let at = now_ms();
-            let input = match ev.result {
-                Ok(reading) => Input::Sample(Sample {
-                    at,
-                    values: reading.values,
-                }),
-                Err(_) => Input::Missed(at),
+    // The engine owns the database on its own thread (SQLite is synchronous).
+    let (requests, inbox) = mpsc::channel(256);
+    let (live, _) = broadcast::channel(256);
+    let ror = RorSettings {
+        window: Duration::from_secs(30),
+        gap: rules.gap,
+        time_scale: args.time_scale,
+    };
+    let engine = Engine::new(recording, live, ror, now_ms);
+    std::thread::spawn(move || engine.run(inbox));
+
+    let to_engine = requests.clone();
+    tokio::spawn(async move {
+        while let Some(ev) = polls.recv().await {
+            let result = ev.result.map_err(|e| e.to_string());
+            let poll = Request::Poll {
+                at: now_ms(),
+                result,
+                retry_in: ev.retry_in,
             };
-            if let Err(err) = recording.handle(input) {
-                tracing::error!(%err, "could not record");
+            if to_engine.send(poll).await.is_err() {
+                return;
             }
         }
-        Ok(())
     });
 
-    tokio::signal::ctrl_c()
+    let port = args.http.port();
+    let mut origins = vec![
+        format!("http://127.0.0.1:{port}"),
+        format!("http://localhost:{port}"),
+    ];
+    origins.extend(args.allow_origin);
+    let app = api::router(api::AppState::new(requests, origins));
+    let listener = tokio::net::TcpListener::bind(args.http)
         .await
-        .context("waiting for Ctrl+C")?;
-    tracing::info!("stopping; every reading so far is on disk");
-    drop(recorder); // the process exit ends the thread; nothing is buffered
+        .with_context(|| format!("listening on {}", args.http))?;
+    tracing::info!("API on http://{}", args.http);
+    axum::serve(listener, app)
+        .with_graceful_shutdown(async {
+            let _ = tokio::signal::ctrl_c().await;
+        })
+        .await
+        .context("serving the API")?;
+    tracing::info!("stopped; every reading so far is on disk");
     Ok(())
 }
