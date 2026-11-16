@@ -10,6 +10,10 @@ const LOSS_W: f64 = 5.0; // W/K loss through the housing
 const EXHAUST_FRAC: f64 = 0.12; // fraction of hot air that actually carries heat away
 const SAFETY_LIMIT: f64 = 280.0; // "Limite segurança" on the HMI options screen
 const LATENT_J_KG: f64 = 2.26e6;
+/// How fast the probe reading falls after a quiet drop (°C/s): below what
+/// Drop detection looks for.
+const GLIDE_PER_S: f64 = 0.05;
+
 const MAX_EVENTS: usize = 200;
 
 /// Something notable that happened inside the simulator, at simulated time `t`.
@@ -129,6 +133,15 @@ pub struct Sim {
 
     events: Vec<Event>,
     rng: crate::rng::Rng,
+
+    // Scenario effects (see `crate::Script`): how the PLC misbehaves.
+    noise_scale: f64,
+    bt_hold: Option<f64>,
+    bt_spike: Option<f64>,
+    quiet_drop: bool,
+    bt_glide: Option<f64>,
+    link_silent: bool,
+    link_delay: std::time::Duration,
 }
 
 impl Sim {
@@ -172,6 +185,13 @@ impl Sim {
             hopper_until: 0.0,
             events: Vec::new(),
             rng,
+            noise_scale: 1.0,
+            bt_hold: None,
+            bt_spike: None,
+            quiet_drop: false,
+            bt_glide: None,
+            link_silent: false,
+            link_delay: std::time::Duration::ZERO,
         }
     }
 
@@ -206,6 +226,9 @@ impl Sim {
     #[allow(clippy::too_many_lines)] // one pass of the physics reads best in one place
     fn step_once(&mut self, dt: f64) {
         self.t += dt;
+        if let Some(glide) = &mut self.bt_glide {
+            *glide -= GLIDE_PER_S * dt;
+        }
 
         // Interlocks a roaster PLC typically has.
         if self.emergency {
@@ -348,6 +371,7 @@ impl Sim {
         self.water_kg = kg * 0.11;
         self.dry_kg = kg - self.water_kg;
         self.t_bean = green_t;
+        self.bt_glide = None;
         (self.running, self.bell, self.charge_at) = (true, false, self.t);
         self.hopper_until = self.t + 3.0;
         let info = format!("{kg:.2} kg @ BT {:.1}", self.bt_probe);
@@ -372,8 +396,14 @@ impl Sim {
         );
         self.event("drop", info);
         self.cooler_t = self.t_bean;
-        (self.loaded, self.running) = (false, false);
-        self.last_timer = self.t - self.charge_at;
+        self.loaded = false;
+        if self.quiet_drop {
+            // The PLC timer keeps counting and the probe shows no fall.
+            self.bt_glide = Some(self.bt_probe);
+        } else {
+            self.running = false;
+            self.last_timer = self.t - self.charge_at;
+        }
         Ok(())
     }
 
@@ -393,7 +423,43 @@ impl Sim {
     }
 
     fn noise(&mut self) -> f64 {
-        self.rng.normal() * 0.25
+        self.rng.normal() * 0.25 * self.noise_scale
+    }
+
+    /// Multiplies the probe noise (1 is normal).
+    pub fn set_noise_scale(&mut self, scale: f64) {
+        self.noise_scale = scale;
+    }
+
+    /// Freezes the bean probe at this value, or lets it go.
+    pub fn set_bt_hold(&mut self, value: Option<f64>) {
+        self.bt_hold = value;
+    }
+
+    /// The next bean probe read returns this, once.
+    pub fn spike_bt(&mut self, value: f64) {
+        self.bt_spike = Some(value);
+    }
+
+    /// Drops that leave no trace: the PLC timer runs on and the probe glides.
+    pub fn set_quiet_drop(&mut self, on: bool) {
+        self.quiet_drop = on;
+    }
+
+    /// The PLC stops answering (`true`) or answers again.
+    pub fn set_link_silent(&mut self, on: bool) {
+        self.link_silent = on;
+    }
+
+    /// The PLC answers after this long.
+    pub fn set_link_delay(&mut self, delay: std::time::Duration) {
+        self.link_delay = delay;
+    }
+
+    /// Whether the PLC answers, and how late.
+    #[must_use]
+    pub fn link(&self) -> (bool, std::time::Duration) {
+        (!self.link_silent, self.link_delay)
     }
 
     /// Returns the value of a register-map point as the PLC would report it,
@@ -406,6 +472,14 @@ impl Sim {
         let value = self
             .value(name)
             .ok_or_else(|| Error::UnknownPoint(name.to_owned()))?;
+        if name == "bt" {
+            if let Some(spike) = self.bt_spike.take() {
+                return Ok(spike);
+            }
+            if let Some(held) = self.bt_hold.or(self.bt_glide) {
+                return Ok(held);
+            }
+        }
         let noisy = matches!(name, "bt" | "et");
         Ok(if noisy { value + self.noise() } else { value })
     }

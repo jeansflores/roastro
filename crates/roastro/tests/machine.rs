@@ -10,9 +10,15 @@ use tokio::sync::{mpsc, oneshot};
 
 /// Serves the simulator on a free loopback port; returns the port.
 async fn simulator() -> u16 {
+    simulator_with(|_| {}).await
+}
+
+/// As [`simulator`], set up by `setup` first.
+async fn simulator_with(setup: impl FnOnce(&mut sim::Sim)) -> u16 {
     let map = Arc::new(roastro::machine::model_map(roastro::machine::SIMULATOR).unwrap());
     let model = Arc::new(Mutex::new(sim::Sim::new(1)));
     model.lock().unwrap().preheat(195.0);
+    setup(&mut model.lock().unwrap());
     let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
         .await
         .unwrap();
@@ -109,5 +115,37 @@ async fn sets_up_a_machine_after_testing_it() {
     })
     .await;
     assert!(connected.is_ok(), "readings arrive from the machine set up");
+    let _ = std::fs::remove_dir_all(dir);
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn a_slow_plc_still_records() {
+    // The `slow` scenario: every answer 400 ms late, three answers a reading.
+    let port = simulator_with(|s| s.set_link_delay(Duration::from_millis(400))).await;
+    let dir = std::env::temp_dir().join(format!("roastro-slow-{}", uuid::Uuid::now_v7()));
+    let running = roastro::start(roastro::Config {
+        url: Some(format!("tcp://127.0.0.1:{port}")),
+        map: roastro::machine::model_map(roastro::machine::SIMULATOR).unwrap(),
+        db: dir.join("roastro.db"),
+        interval: Duration::from_secs(1),
+        time_scale: 1.0,
+        demo: None,
+    })
+    .unwrap();
+    let mut live = running.live.subscribe();
+    let mut samples = 0;
+    let mut downs = 0;
+    let _ = tokio::time::timeout(Duration::from_secs(6), async {
+        while let Ok(msg) = live.recv().await {
+            match &*msg {
+                Live::Sample(_) => samples += 1,
+                Live::Link(l) if l.state == LinkState::Down => downs += 1,
+                _ => {}
+            }
+        }
+    })
+    .await;
+    assert!(samples >= 3, "readings keep arriving: {samples}");
+    assert_eq!(downs, 0, "late is not down");
     let _ = std::fs::remove_dir_all(dir);
 }

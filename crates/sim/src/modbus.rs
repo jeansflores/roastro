@@ -1,5 +1,6 @@
-use std::future::{Ready, ready};
+use std::future::{Future, ready};
 use std::net::SocketAddr;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex, PoisonError};
 
 use regmap::{Kind, Map};
@@ -161,15 +162,32 @@ impl Service for ModbusService {
     type Request = SlaveRequest<'static>;
     type Response = Response;
     type Exception = ExceptionCode;
-    type Future = Ready<Result<Response, ExceptionCode>>;
+    type Future = Pin<Box<dyn Future<Output = Result<Response, ExceptionCode>> + Send>>;
 
     fn call(&self, req: Self::Request) -> Self::Future {
         let unit = self.map.unit_id();
         // 0 is broadcast and 255 is what most TCP clients send; anything else must match.
         if req.slave != unit && req.slave != 0 && req.slave != 255 {
-            return ready(Err(ExceptionCode::GatewayTargetDevice));
+            return Box::pin(ready(Err(ExceptionCode::GatewayTargetDevice)));
         }
-        ready(self.handle(req.request))
+        let (answers, delay) = self
+            .sim
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .link();
+        if !answers {
+            // A scenario's dropout: the client times out.
+            return Box::pin(std::future::pending());
+        }
+        let result = self.handle(req.request);
+        if delay.is_zero() {
+            Box::pin(ready(result))
+        } else {
+            Box::pin(async move {
+                tokio::time::sleep(delay).await;
+                result
+            })
+        }
     }
 }
 
@@ -195,7 +213,13 @@ mod tests {
         slave: u8,
         request: Request<'static>,
     ) -> Result<Response, ExceptionCode> {
-        svc.call(SlaveRequest { slave, request }).into_inner()
+        // Without a scenario the answer is ready at the first poll.
+        let mut answer = svc.call(SlaveRequest { slave, request });
+        let mut cx = std::task::Context::from_waker(std::task::Waker::noop());
+        match answer.as_mut().poll(&mut cx) {
+            std::task::Poll::Ready(result) => result,
+            std::task::Poll::Pending => panic!("the simulator should answer at once"),
+        }
     }
 
     #[test]

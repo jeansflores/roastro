@@ -27,6 +27,8 @@ make help        # everything else
 
 Both servers listen on loopback by default (`--modbus tcp://127.0.0.1:5502`, `--http 127.0.0.1:8080`); pass another address to expose them. `--auto` (used by `make run-sim`) turns on an "operator" that preheats, charges 5 kg at 200 °C, adjusts gas and air by temperature band, drops at 210 °C, cools and starts over. Without `--auto`, you (or your app) are in control. To skip the cold warm-up: `curl 'localhost:8080/preheat?temp=200'`.
 
+`--scenario <name>` makes the PLC misbehave on cue, to see what Roastro does when the machine is not ideal: `noisy-charge` (a noisy probe), `missed-drop` (a Drop that leaves no trace), `dropout` (no answers for 20 s, then 6 min), `stuck-probe`, `spike` (absurd BT readings), `slow` (late answers) and `alarms` (flame failure, emergency stop). The desktop's built-in simulator takes the same flag: `cargo run -p desktop -- --simulator --scenario dropout`. The same scenarios run offline as tests of the recorder.
+
 ### Monitor
 
 ```

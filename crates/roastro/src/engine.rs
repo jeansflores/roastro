@@ -3,6 +3,8 @@
 //! happens in one order and the live stream never contradicts the database.
 
 mod edits;
+#[cfg(test)]
+mod scenarios;
 
 use std::collections::VecDeque;
 use std::path::PathBuf;
@@ -618,8 +620,10 @@ impl Engine {
         }
         live.last_at = s.at;
         let roast_ms = (s.at - live.charge_at) as f64 * self.ror.time_scale;
-        live.ror
-            .add(Duration::from_millis(roast_ms as u64), *s.values.get("bt")?);
+        live.ror.add(
+            Duration::from_millis(roast_ms as u64),
+            recorder::plausible_bt(*s.values.get("bt")?)?,
+        );
         live.ror.value()
     }
 
@@ -681,7 +685,10 @@ impl Engine {
             .map_err(ApiError::internal)?;
         let bt: Vec<(Millis, Option<f64>)> = samples
             .iter()
-            .map(|s| (s.at, s.values.get("bt").copied()))
+            .map(|s| {
+                let bt = s.values.get("bt").copied();
+                (s.at, bt.and_then(recorder::plausible_bt))
+            })
             .collect();
         let at = |kind: &str| doc.events.iter().find(|e| e.kind == kind).map(|e| e.at);
         let drop = at("drop");

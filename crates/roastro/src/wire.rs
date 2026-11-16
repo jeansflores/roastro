@@ -416,7 +416,12 @@ pub fn samples_with_ror(
     let from_charge: Vec<(Millis, Option<f64>)> = samples
         .iter()
         .filter(|s| s.at >= start)
-        .map(|s| (s.at, s.values.get("bt").copied()))
+        .map(|s| {
+            (
+                s.at,
+                s.values.get("bt").copied().and_then(recorder::plausible_bt),
+            )
+        })
         .collect();
     let mut rates = ror_series(&from_charge, ror.window, ror.gap, ror.time_scale).into_iter();
     samples
