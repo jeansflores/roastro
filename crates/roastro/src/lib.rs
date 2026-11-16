@@ -5,6 +5,7 @@
 //! thread, the PLC poller on the Tokio runtime, and a [`Running`] handle with
 //! the engine's request queue and live broadcast. It never writes to the PLC.
 
+pub mod alarm;
 pub mod api;
 pub mod engine;
 pub mod export;

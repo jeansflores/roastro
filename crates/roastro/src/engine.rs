@@ -18,6 +18,7 @@ use roast::RoR;
 use store::RoastId;
 use tokio::sync::{broadcast, mpsc, oneshot};
 
+use crate::alarm::Alarm;
 use crate::api::ApiError;
 use crate::record::Recording;
 use crate::wire::BackupOut;
@@ -180,6 +181,8 @@ pub struct Engine {
     link_control: Option<mpsc::Sender<LinkCommand>>,
     /// The machine in use.
     machine: MachineOut,
+    /// Alarms active at the last reading.
+    alarms: Vec<Alarm>,
 }
 
 struct LiveRoR {
@@ -229,6 +232,7 @@ impl Engine {
             open_drop: None,
             link_control: None,
             machine,
+            alarms: Vec::new(),
         };
         if let Some(id) = shown {
             engine.start_live_ror(id);
@@ -536,6 +540,7 @@ impl Engine {
                 if let Err(err) = self.apply(Input::Sample(sample.clone())) {
                     tracing::error!(%err, "could not record a reading");
                 }
+                self.watch_alarms(at, &sample);
                 let out = SampleOut {
                     at,
                     ror: self.live_rate(&sample),
@@ -573,6 +578,31 @@ impl Engine {
                 if let Err(err) = self.apply(Input::Missed(at)) {
                     tracing::error!(%err, "could not record a missed poll");
                 }
+            }
+        }
+    }
+
+    /// Notes on the roast every alarm that starts while it is recorded.
+    fn watch_alarms(&mut self, at: Millis, sample: &Sample) {
+        let active: Vec<Alarm> = Alarm::active(|p| sample.values.get(p).copied()).collect();
+        let started: Vec<Alarm> = active
+            .iter()
+            .copied()
+            .filter(|a| !self.alarms.contains(a))
+            .collect();
+        self.alarms = active;
+        let Some(roast) = self.recording.current() else {
+            return;
+        };
+        for alarm in started {
+            tracing::warn!(alarm = alarm.name(), "machine alarm");
+            if let Err(err) = self.recording.store_mut().add_note(roast, at, alarm.name()) {
+                tracing::error!(%err, "could not note an alarm");
+            }
+            if self.shown == Some(roast)
+                && let Ok(doc) = self.doc(roast)
+            {
+                self.publish(Live::Roast(doc));
             }
         }
     }
