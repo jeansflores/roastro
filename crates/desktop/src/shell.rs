@@ -16,6 +16,7 @@ use gpui_kit::{
 use uuid::Uuid;
 
 use crate::chart;
+use crate::coffees::{CoffeePage, CoffeesPage, OpenCoffee, RoastItNext, ShowRoasts};
 use crate::compare::{ComparePage, CompareRoasts};
 use crate::roast_detail::{Back, RoastDetail};
 use crate::roasts::{OpenRoast, RoastsPage};
@@ -32,6 +33,8 @@ pub enum Page {
     /// Several roasts side by side.
     Compare,
     Coffees,
+    /// One coffee.
+    Coffee,
     Machine,
 }
 
@@ -42,7 +45,7 @@ impl Page {
         match self {
             Self::Live => "Live roast",
             Self::Roasts | Self::Roast | Self::Compare => "Roasts",
-            Self::Coffees => "Coffees",
+            Self::Coffees | Self::Coffee => "Coffees",
             Self::Machine => "Machine",
         }
     }
@@ -51,7 +54,7 @@ impl Page {
         match self {
             Self::Live => "live",
             Self::Roasts | Self::Roast | Self::Compare => "roasts",
-            Self::Coffees => "coffees",
+            Self::Coffees | Self::Coffee => "coffees",
             Self::Machine => "machine",
         }
     }
@@ -60,7 +63,7 @@ impl Page {
         match self {
             Self::Live => Icon::new(Lucide::Flame),
             Self::Roasts | Self::Roast | Self::Compare => Icon::new(Lucide::ChartSpline),
-            Self::Coffees => Icon::new(Lucide::Coffee),
+            Self::Coffees | Self::Coffee => Icon::new(Lucide::Coffee),
             Self::Machine => Icon::new(IconName::Cpu),
         }
     }
@@ -80,6 +83,9 @@ pub struct Shell {
     detail: Option<Entity<RoastDetail>>,
     /// The comparison opened last.
     compare: Option<Entity<ComparePage>>,
+    coffees: Entity<CoffeesPage>,
+    /// The coffee opened last, and what keeps its events heard.
+    coffee: Option<(Entity<CoffeePage>, [Subscription; 3])>,
     /// Whether a roast was recording at the last look: when that changes,
     /// the list has a roast more.
     was_recording: bool,
@@ -98,6 +104,7 @@ impl Shell {
     ) -> Self {
         let live = cx.new(|cx| RoastScreen::new(engine.clone(), time_scale, window, cx));
         let roasts = cx.new(|cx| RoastsPage::new(engine.clone(), time_scale, window, cx));
+        let coffees = cx.new(|cx| CoffeesPage::new(engine.clone(), cx));
         roasts.update(cx, RoastsPage::reload);
         let subscriptions = vec![
             cx.observe(&live, |this, live, cx| {
@@ -115,6 +122,13 @@ impl Shell {
                 this.open(open.0, window, cx);
             }),
             cx.subscribe_in(
+                &coffees,
+                window,
+                |this, _, open: &OpenCoffee, window, cx| {
+                    this.open_coffee(open.0, window, cx);
+                },
+            ),
+            cx.subscribe_in(
                 &roasts,
                 window,
                 |this, _, ids: &CompareRoasts, window, cx| {
@@ -130,6 +144,8 @@ impl Shell {
             roasts,
             detail: None,
             compare: None,
+            coffees,
+            coffee: None,
             was_recording: false,
             _subscriptions: subscriptions,
             detail_back: None,
@@ -156,6 +172,30 @@ impl Shell {
         self.go(Page::Roast, cx);
     }
 
+    /// Opens one coffee's page.
+    fn open_coffee(&mut self, id: Uuid, window: &mut Window, cx: &mut Context<Self>) {
+        let engine = self.engine.clone();
+        let time_scale = self.time_scale;
+        let page = cx.new(|cx| CoffeePage::new(engine, id, time_scale, window, cx));
+        let subscriptions = [
+            cx.subscribe_in(&page, window, |this, _, open: &OpenRoast, window, cx| {
+                this.open(open.0, window, cx);
+            }),
+            cx.subscribe(&page, |this, _, next: &RoastItNext, cx| {
+                this.live
+                    .update(cx, |live, cx| live.choose_coffee(Some(next.0), cx));
+                this.go(Page::Live, cx);
+            }),
+            cx.subscribe(&page, |this, _, show: &ShowRoasts, cx| {
+                this.roasts
+                    .update(cx, |roasts, cx| roasts.show_coffee(show.0, cx));
+                this.go(Page::Roasts, cx);
+            }),
+        ];
+        self.coffee = Some((page, subscriptions));
+        self.go(Page::Coffee, cx);
+    }
+
     /// Opens the Compare page on these roasts.
     fn compare(&mut self, ids: Vec<Uuid>, window: &mut Window, cx: &mut Context<Self>) {
         let engine = self.engine.clone();
@@ -171,6 +211,9 @@ impl Shell {
     }
 
     fn go(&mut self, page: Page, cx: &mut Context<Self>) {
+        if page == Page::Coffees {
+            self.coffees.update(cx, |coffees, cx| coffees.reload(cx));
+        }
         if self.page != page {
             self.page = page;
             cx.notify();
@@ -375,10 +418,7 @@ impl Shell {
 
     /// A page that is not built yet: says what it will hold.
     fn coming(page: Page) -> AnyElement {
-        let what = match page {
-            Page::Coffees => "Your green coffees, their lots and how they roast.",
-            _ => "The machine, its connection and its readings.",
-        };
+        let what = "The machine, its connection and its readings.";
         div()
             .id(SharedString::from(format!("page-{}", page.id())))
             .test_support()
@@ -474,7 +514,12 @@ impl Render for Shell {
                 Some(compare) => compare.clone().into_any_element(),
                 None => self.roasts.clone().into_any_element(),
             },
-            other => Self::coming(other),
+            Page::Coffees => self.coffees.clone().into_any_element(),
+            Page::Coffee => match &self.coffee {
+                Some((coffee, _)) => coffee.clone().into_any_element(),
+                None => self.coffees.clone().into_any_element(),
+            },
+            Page::Machine => Self::coming(Page::Machine),
         };
         let nav = if self.page == Page::Live {
             self.rail(&st, cx).into_any_element()
@@ -755,5 +800,91 @@ mod tests {
         })
         .unwrap();
         assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Roast);
+    }
+
+    #[gpui_kit::test]
+    fn adds_a_coffee_and_roasts_it_next(cx: &mut TestAppContext) {
+        use roastro::wire::CoffeeOut;
+
+        let (handle, shell, mut rx) = open(cx);
+        let guji = CoffeeOut {
+            id: Uuid::now_v7(),
+            name: "Ethiopia Guji".into(),
+            notes: String::new(),
+            lot: "2401".into(),
+            origin: "Ethiopia".into(),
+            process: "Natural".into(),
+            supplier: String::new(),
+            archived: false,
+            stats: None,
+        };
+        // Answers as the engine would; says what was stored.
+        let serve = |rx: &mut mpsc::Receiver<Request>| {
+            let mut seen = Vec::new();
+            while let Ok(req) = rx.try_recv() {
+                match req {
+                    Request::Edit(Edit::Coffees(_, reply)) => {
+                        let _ = reply.send(Ok(vec![guji.clone()]));
+                    }
+                    Request::Edit(Edit::Roasts(_, reply)) => {
+                        let _ = reply.send(Ok(RoastPage {
+                            roasts: Vec::new(),
+                            next_before: None,
+                        }));
+                    }
+                    Request::Edit(Edit::AddCoffee(body, _)) => {
+                        seen.push(format!("add {} lot {}", body.name, body.lot));
+                    }
+                    Request::Edit(Edit::PutNextRoast(next, _)) => {
+                        seen.push(format!("next {}", next.coffee_id == Some(guji.id)));
+                    }
+                    _ => {}
+                }
+            }
+            seen
+        };
+        serve(&mut rx);
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("rail-coffees", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        serve(&mut rx);
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("add-coffee-open", cx);
+            window.render_frame(cx);
+            window.click("new-coffee-name", cx);
+            window.input("Kenya Nyeri", cx);
+            window.click("new-coffee-lot", cx);
+            window.input("2412", cx);
+            window.click("add-coffee-save", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(serve(&mut rx), ["add Kenya Nyeri lot 2412"]);
+
+        let row: &'static str = Box::leak(format!("coffee-{}", guji.id).into_boxed_str());
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click(row, cx);
+        })
+        .unwrap();
+        assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Coffee);
+        for _ in 0..3 {
+            cx.run_until_parked();
+            serve(&mut rx);
+        }
+        cx.run_until_parked();
+        cx.update_window(handle, |_, window, cx| {
+            window.render_frame(cx);
+            window.click("roast-it-next", cx);
+        })
+        .unwrap();
+        cx.run_until_parked();
+        assert_eq!(serve(&mut rx), ["next true"]);
+        assert_eq!(cx.update(|cx| shell.read(cx).page), Page::Live);
     }
 }

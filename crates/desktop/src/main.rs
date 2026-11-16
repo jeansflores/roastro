@@ -13,6 +13,7 @@
 
 mod assets;
 mod chart;
+mod coffees;
 mod compare;
 mod roast_detail;
 mod roasts;

@@ -249,7 +249,7 @@ impl RoastScreen {
     }
 
     /// A new coffee clears the reference, then takes the suggested one.
-    pub(super) fn choose_coffee(&mut self, coffee: Option<Uuid>, cx: &mut Context<Self>) {
+    pub(crate) fn choose_coffee(&mut self, coffee: Option<Uuid>, cx: &mut Context<Self>) {
         if self.state.next.as_ref().and_then(|n| n.coffee_id) == coffee {
             return;
         }
@@ -283,10 +283,15 @@ impl RoastScreen {
         self.next_form
             .new_coffee
             .update(cx, |input, cx| input.set_value("", window, cx));
-        let Some(reply) = self
-            .engine
-            .ask(|r| Request::Edit(Edit::AddCoffee(CoffeeIn { name }, r)))
-        else {
+        let Some(reply) = self.engine.ask(|r| {
+            Request::Edit(Edit::AddCoffee(
+                CoffeeIn {
+                    name,
+                    ..CoffeeIn::default()
+                },
+                r,
+            ))
+        }) else {
             return;
         };
         cx.spawn(async move |this, cx| {

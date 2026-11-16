@@ -22,10 +22,13 @@ use uuid::Uuid;
 
 mod edit;
 
-pub use edit::{Coffee, RoastPatch, RoastQuery};
+pub use edit::{Coffee, CoffeeChange, CoffeeStats, RoastPatch, RoastQuery};
 
 /// The migrations, in order. Never edit one that has shipped; add a new one.
-const MIGRATIONS: &[&str] = &[include_str!("../migrations/0001_initial.sql")];
+const MIGRATIONS: &[&str] = &[
+    include_str!("../migrations/0001_initial.sql"),
+    include_str!("../migrations/0002_coffee_details.sql"),
+];
 
 /// Name of the machine row created with a new database.
 const DEFAULT_MACHINE: &str = "Caloratto 5 kg";
