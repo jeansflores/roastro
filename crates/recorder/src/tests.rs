@@ -444,3 +444,16 @@ fn resumes_a_roast_after_a_restart() {
     let out = run(&mut r, [bt(101.0, 150.0), bt(121.0, 150.0)]);
     assert_eq!(closures(&out), [Closure::AfterDrop]);
 }
+
+#[test]
+fn the_operator_closes_a_roast_without_drop() {
+    let mut r = Recorder::new(Rules::default());
+    run(&mut r, [bt(0.0, 120.0), Input::ChargePressed(ms(0.0))]);
+    let out = run(&mut r, [Input::ClosePressed]);
+    assert_eq!(closures(&out), [Closure::Operator]);
+    assert!(Closure::Operator.is_incomplete() && !r.is_recording());
+    assert!(
+        run(&mut r, [Input::ClosePressed]).is_empty(),
+        "nothing to close"
+    );
+}

@@ -23,6 +23,8 @@ pub enum Live {
     Roast(RoastDoc),
     /// The PLC link changed.
     Link(Link),
+    /// The Next roast changed.
+    NextRoast(NextRoastOut),
 }
 
 impl Live {
@@ -91,17 +93,24 @@ pub struct NextRoastOut {
     pub roasted_by: String,
     /// Roast drawn behind.
     pub reference_id: Option<Uuid>,
+    /// The chosen coffee's latest Done roast, offered as the reference.
+    pub suggested_reference_id: Option<Uuid>,
 }
 
 impl NextRoastOut {
-    /// Reads it from the database.
+    /// Reads it from the database, with the suggested reference.
     pub fn load(store: &Store) -> store::Result<Self> {
         let next = store.next_roast()?;
+        let suggested = match next.coffee_id {
+            Some(c) => store.latest_done_roast(c)?.map(|r| r.0),
+            None => None,
+        };
         Ok(Self {
             coffee_id: next.coffee_id,
             green_weight_g: next.green_weight_g,
             roasted_by: next.roasted_by,
             reference_id: next.reference_id.map(|r| r.0),
+            suggested_reference_id: suggested,
         })
     }
 }
@@ -330,4 +339,101 @@ impl Columns {
             values,
         }
     }
+}
+
+/// Reads a field that may be absent (leave alone) or `null` (clear):
+/// absent is `None`, `null` is `Some(None)`.
+#[allow(clippy::option_option)] // the two layers are the point: absent vs null
+fn present<'de, T, D>(d: D) -> Result<Option<Option<T>>, D::Error>
+where
+    T: serde::Deserialize<'de>,
+    D: serde::Deserializer<'de>,
+{
+    <Option<T> as serde::Deserialize>::deserialize(d).map(Some)
+}
+
+/// `PUT /api/roasts/{id}/events/{kind}`.
+#[derive(Debug, serde::Deserialize)]
+pub struct EventIn {
+    pub at: Millis,
+}
+
+/// `POST /api/roasts/{id}/notes`.
+#[derive(Debug, serde::Deserialize)]
+pub struct NoteIn {
+    pub at: Millis,
+    pub text: String,
+}
+
+/// `PATCH /api/roasts/{id}/notes/{note_id}`.
+#[derive(Debug, serde::Deserialize)]
+pub struct NotePatch {
+    pub at: Option<Millis>,
+    pub text: Option<String>,
+}
+
+/// `PATCH /api/roasts/{id}`: only the fields present change; `null` clears.
+#[allow(clippy::option_option)] // absent (leave alone) vs null (clear)
+#[derive(Debug, Default, serde::Deserialize)]
+pub struct RoastPatchIn {
+    #[serde(default, deserialize_with = "present")]
+    pub coffee_id: Option<Option<Uuid>>,
+    #[serde(default, deserialize_with = "present")]
+    pub green_weight_g: Option<Option<i64>>,
+    #[serde(default, deserialize_with = "present")]
+    pub roasted_weight_g: Option<Option<i64>>,
+    pub roasted_by: Option<String>,
+    #[serde(default, deserialize_with = "present")]
+    pub reference_id: Option<Option<Uuid>>,
+}
+
+/// `PUT /api/next-roast`: the whole Next roast.
+#[derive(Debug, serde::Deserialize)]
+pub struct NextRoastIn {
+    pub coffee_id: Option<Uuid>,
+    pub green_weight_g: Option<i64>,
+    #[serde(default)]
+    pub roasted_by: String,
+    pub reference_id: Option<Uuid>,
+}
+
+/// A coffee.
+#[derive(Debug, Serialize)]
+pub struct CoffeeOut {
+    pub id: Uuid,
+    pub name: String,
+    pub notes: String,
+    pub archived: bool,
+}
+
+impl From<store::Coffee> for CoffeeOut {
+    fn from(c: store::Coffee) -> Self {
+        Self {
+            id: c.id,
+            name: c.name,
+            notes: c.notes,
+            archived: c.archived,
+        }
+    }
+}
+
+/// `POST /api/coffees`.
+#[derive(Debug, serde::Deserialize)]
+pub struct CoffeeIn {
+    pub name: String,
+}
+
+/// `PATCH /api/coffees/{id}`.
+#[derive(Debug, serde::Deserialize)]
+pub struct CoffeePatch {
+    pub name: Option<String>,
+    pub archived: Option<bool>,
+}
+
+/// `GET /api/roasts`: a page of roasts, newest first.
+#[derive(Debug, Serialize)]
+pub struct RoastPage {
+    pub roasts: Vec<RoastDoc>,
+    /// Pass as `?before=` for the next page; `null` on the last one.
+    pub next_before: Option<Uuid>,
 }
