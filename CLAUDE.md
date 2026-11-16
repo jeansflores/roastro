@@ -23,9 +23,9 @@ crates/store     SQLite: schema, embedded migrations on PRAGMA user_version, the
 crates/regmap    register map loading, validation, encode/decode
 crates/machine   machine facts from the manual (fan % → m³/h, drum % → rpm)
 crates/plc       async Modbus client by point name (timeouts, reconnect, loopback-only writes) and poller with backoff
-crates/roastro   the core (lib): engine thread owns recorder + store, roastro::start; the polling task (Retry now, machine switch, Test connection); built-in machine models; binary serves the axum API and live WebSocket on 127.0.0.1:8000 (Origin-checked, no PLC writes)
+crates/roastro   the core (lib): engine thread owns recorder + store, roastro::start; the polling task (Retry now, machine switch, Test connection); built-in machine models; alarms; CSV and PDF exports; backup and restore; binary serves the axum API and live WebSocket on 127.0.0.1:8000 (Origin-checked, no PLC writes)
 crates/desktop   the native app (GPUI + gpui-component), engine in process: shell with Live roast, Roasts, Roast, Compare, Coffees, Coffee, New roast and Machine pages; the machine is set up in the app (--url overrides it, --simulator reads the built-in simulator)
-crates/sim       PLC simulator: thermal model, interlocks, autopilot; binary serves Modbus TCP :5502 + HTTP panel :8080 on loopback
+crates/sim       PLC simulator: thermal model, interlocks, autopilot, scenarios (--scenario); binary serves Modbus TCP :5502 + HTTP panel :8080 on loopback
 crates/probe     line-based Modbus client (read, CSV, one-off writes)
 crates/monitor   terminal dashboard (ratatui) with live readings and keyboard commands
 configs/         runtime config (register map)
