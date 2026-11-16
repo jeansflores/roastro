@@ -64,7 +64,7 @@ impl EventEmitter<Back> for RoastDetail {}
 impl EventEmitter<CompareRoasts> for RoastDetail {}
 
 /// Readings in rows, from the columns the engine sends.
-fn rows(c: &Columns) -> Vec<SampleOut> {
+pub(crate) fn rows(c: &Columns) -> Vec<SampleOut> {
     c.at.iter()
         .enumerate()
         .map(|(i, &at)| SampleOut {

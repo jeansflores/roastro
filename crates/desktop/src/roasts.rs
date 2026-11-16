@@ -20,8 +20,8 @@ use uuid::Uuid;
 
 use crate::chart;
 use crate::compare::{self, CompareRoasts};
+use crate::new_roast::Choice;
 use crate::state::Millis;
-use crate::view::next_roast::Choice;
 use crate::view::rail::label;
 use crate::view::{Engine, clock, fmt1, white};
 

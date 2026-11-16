@@ -14,6 +14,7 @@ use uuid::Uuid;
 /// A message on the live stream (`GET /api/live`): `{ "type", "data" }`.
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)] // every message travels in an Arc; boxing buys nothing
 pub enum Live {
     /// Everything at once, on every (re)connect.
     Snapshot(Snapshot),
@@ -96,6 +97,10 @@ pub struct NextRoastOut {
     pub reference_id: Option<Uuid>,
     /// The chosen coffee's latest Done roast, offered as the reference.
     pub suggested_reference_id: Option<Uuid>,
+    /// The coffee's name, for a summary.
+    pub coffee_name: Option<String>,
+    /// The reference's number, for a summary.
+    pub reference_number: Option<i64>,
 }
 
 impl NextRoastOut {
@@ -110,12 +115,22 @@ impl NextRoastOut {
             Some(c) => store.latest_done_roast(c)?.map(|r| r.0),
             None => None,
         };
+        let coffee_name = match next.coffee_id {
+            Some(c) => store.coffee_name(c)?,
+            None => None,
+        };
+        let reference_number = match next.reference_id {
+            Some(r) => Some(store.roast(r)?.number),
+            None => None,
+        };
         Ok(Self {
             coffee_id: next.coffee_id,
             green_weight_g: next.green_weight_g,
             roasted_by: next.roasted_by,
             reference_id: next.reference_id.map(|r| r.0),
             suggested_reference_id: suggested,
+            coffee_name,
+            reference_number,
         })
     }
 }

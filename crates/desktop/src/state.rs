@@ -329,6 +329,8 @@ mod tests {
                 roasted_by: String::new(),
                 reference_id: None,
                 suggested_reference_id: None,
+                coffee_name: None,
+                reference_number: None,
             },
             roast: None,
             samples: Vec::new(),

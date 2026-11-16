@@ -384,6 +384,37 @@ impl RoastScreen {
             }))
     }
 
+    /// The Next roast in one line, and the way to change it: the New roast
+    /// page is where it is prepared.
+    fn next_summary(&self, cx: &mut Context<Self>) -> impl IntoElement {
+        let next = self.state.next.as_ref();
+        let parts: Vec<String> = [
+            next.and_then(|n| n.coffee_name.clone())
+                .or_else(|| Some("No coffee set".to_owned())),
+            next.and_then(|n| n.green_weight_g)
+                .map(|g| format!("{} kg", super::kilograms(g))),
+            next.map(|n| n.roasted_by.clone()).filter(|b| !b.is_empty()),
+            Some(
+                next.and_then(|n| n.reference_number)
+                    .map_or_else(|| "no reference".to_owned(), |n| format!("reference #{n}")),
+            ),
+        ]
+        .into_iter()
+        .flatten()
+        .collect();
+        div()
+            .id("next-summary")
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(div().text_sm().child(parts.join(" · ")))
+            .child(
+                Button::new("prepare-next")
+                    .label("Prepare the next roast")
+                    .on_click(cx.listener(|_, _, _, cx| cx.emit(super::OpenNewRoast))),
+            )
+    }
+
     /// Before Charge: the current temperatures and the Charge button.
     fn waiting(&self, cx: &mut Context<Self>) -> impl IntoElement {
         let [_, bt, _, et, _, _] = live_figures(&self.state);
@@ -397,7 +428,7 @@ impl RoastScreen {
                     .font_weight(FontWeight::BOLD)
                     .child("Next roast"),
             )
-            .child(self.next_roast_panel(cx))
+            .child(self.next_summary(cx))
             .children((!self.big).then(|| pair_large(bt, et)))
             .child(
                 Button::new("next-event")
@@ -681,7 +712,7 @@ impl RoastScreen {
                     .font_weight(FontWeight::BOLD)
                     .child("Next roast"),
             )
-            .child(self.next_roast_panel(cx))
+            .child(self.next_summary(cx))
             .child(
                 div()
                     .flex()
