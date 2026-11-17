@@ -67,3 +67,10 @@ jobs:
         with:
           name: roastro-desktop-windows
           path: target/release/roastro-desktop.exe
+      - name: Portable .exe stands alone (no VCRUNTIME140.dll)
+        shell: pwsh
+        run: |
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath
+          $dumpbin = Get-ChildItem "$vs\VC\Tools\MSVC\*\bin\Hostx64\x64\dumpbin.exe" | Select-Object -First 1
+          $deps = & $dumpbin.FullName /dependents target\release\roastro-desktop.exe
+          if ($deps -match 'VCRUNTIME') { $deps; throw "the .exe needs the Visual C++ runtime" }
