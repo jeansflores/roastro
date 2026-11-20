@@ -152,9 +152,9 @@ pub fn advice(trouble: plc::Trouble) -> &'static str {
             "The machine does not answer at this address. Check that it is on, the network cable and the address.",
         ),
         plc::Trouble::Slow => t("The machine stopped answering in time. Check the network."),
-        plc::Trouble::Refused => {
-            t("The machine answers but refuses the readings: the model may not match this machine.")
-        }
+        plc::Trouble::Refused => t(
+            "The machine answers but refuses the readings: the model may not match this machine. Try the other Caloratto model.",
+        ),
         plc::Trouble::Broken => t("The connection broke. Roastro reconnects on its own."),
     }
 }

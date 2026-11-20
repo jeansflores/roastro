@@ -190,7 +190,7 @@
 "The built-in simulator could not start." = "O simulador embutido não conseguiu iniciar."
 "The burner is off. Check the flame before relighting on the machine's panel." = "O queimador está desligado. Verifique a chama antes de reacender no painel da máquina."
 "The connection broke. Roastro reconnects on its own." = "A conexão caiu. O Roastro reconecta sozinho."
-"The machine answers but refuses the readings: the model may not match this machine." = "A máquina responde mas recusa as leituras: o modelo pode não corresponder a esta máquina."
+"The machine answers but refuses the readings: the model may not match this machine. Try the other Caloratto model." = "A máquina responde mas recusa as leituras: o modelo pode não corresponder a esta máquina. Tente o outro modelo de Caloratto."
 "The machine is stopped. Release the emergency button on the machine when it is safe." = "A máquina está parada. Solte o botão de emergência na máquina quando for seguro."
 "The machine stopped answering in time. Check the network." = "A máquina deixou de responder a tempo. Verifique a rede."
 "The next roast will follow Roast #{n}." = "A próxima torra vai seguir a Torra #{n}."

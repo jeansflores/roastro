@@ -15,7 +15,7 @@ use gpui_kit::{
 };
 use i18n::{t, tf};
 use roastro::engine::{Edit, Request};
-use roastro::machine::{CALORATTO, MODELS};
+use roastro::machine::{CALORATTO_LEGACY, MODELS, example_address};
 use std::path::PathBuf;
 
 use roastro::wire::{BackupOut, LinkDropOut, LinkState, MachineIn, TestOut};
@@ -145,9 +145,11 @@ impl MachinePage {
             live,
             editing: false,
             name: cx.new(|cx| InputState::new(window, cx).placeholder(t("Caloratto"))),
-            address: cx.new(|cx| InputState::new(window, cx).placeholder("192.168.5.11:502")),
+            address: cx.new(|cx| {
+                InputState::new(window, cx).placeholder(example_address(CALORATTO_LEGACY))
+            }),
             model,
-            model_id: CALORATTO,
+            model_id: CALORATTO_LEGACY,
             demo: false,
             filled: false,
             testing: false,

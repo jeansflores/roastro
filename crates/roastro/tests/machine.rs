@@ -149,3 +149,57 @@ async fn a_slow_plc_still_records() {
     assert_eq!(downs, 0, "late is not down");
     let _ = std::fs::remove_dir_all(dir);
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn tests_a_legacy_caloratto() {
+    // A PLC with the Legacy layout: the temperatures at holding 8000/8001.
+    let map = Arc::new(roastro::machine::model_map(roastro::machine::CALORATTO_LEGACY).unwrap());
+    let model = Arc::new(Mutex::new(sim::Sim::new(1)));
+    model.lock().unwrap().preheat(195.0);
+    let listener = tokio::net::TcpListener::bind(("127.0.0.1", 0))
+        .await
+        .unwrap();
+    let port = listener.local_addr().unwrap().port();
+    let service = sim::ModbusService::new(map, model);
+    tokio::spawn(async move {
+        let on_connected = |stream, peer| {
+            let svc = service.for_peer(peer);
+            async move {
+                tokio_modbus::server::tcp::accept_tcp_connection(stream, peer, move |_| {
+                    Ok(Some(svc.clone()))
+                })
+            }
+        };
+        let _ = tokio_modbus::server::tcp::Server::new(listener)
+            .serve(&on_connected, |_| {})
+            .await;
+    });
+
+    let dir = std::env::temp_dir().join(format!("roastro-legacy-{}", uuid::Uuid::now_v7()));
+    let running = roastro::start(roastro::Config {
+        url: None,
+        map: roastro::machine::model_map(roastro::machine::SIMULATOR).unwrap(),
+        db: dir.join("roastro.db"),
+        interval: Duration::from_millis(100),
+        time_scale: 1.0,
+        demo: None,
+    })
+    .unwrap();
+    let test = ask(&running.requests, |r| {
+        Edit::TestMachine(
+            MachineIn {
+                name: "Caloratto".into(),
+                address: format!("127.0.0.1:{port}"),
+                model: roastro::machine::CALORATTO_LEGACY.into(),
+                demo: false,
+            },
+            r,
+        )
+    })
+    .await
+    .unwrap();
+    let bt = test.values["bt"];
+    assert!((150.0..=250.0).contains(&bt), "whole degrees: {test:?}");
+    assert!(test.values.contains_key("et"), "{test:?}");
+    let _ = std::fs::remove_dir_all(dir);
+}

@@ -4,14 +4,18 @@
 
 use regmap::Map;
 
-/// The real machine's model, from Artisan's Caloratto 2.0 preset. Read only:
-/// it has no writable points (see `CLAUDE.md`).
+/// Caloratto machines built before August 2020 (WEG PLC300), from Artisan's
+/// Legacy preset: the two temperatures only. Read only.
+pub const CALORATTO_LEGACY: &str = "caloratto-legacy";
+/// Caloratto machines built since August 2020, from Artisan's Caloratto 2.0
+/// preset. Read only: it has no writable points (see `CLAUDE.md`).
 pub const CALORATTO: &str = "caloratto-2.0";
 /// The built-in simulator's model, also the Demo machine's.
 pub const SIMULATOR: &str = "simulator";
 
 /// Every model, with the name a person picks it by.
-pub const MODELS: [(&str, &str); 2] = [
+pub const MODELS: [(&str, &str); 3] = [
+    (CALORATTO_LEGACY, "Carmomaq Caloratto Legacy"),
     (CALORATTO, "Carmomaq Caloratto 2.0"),
     (SIMULATOR, "Roastro simulator"),
 ];
@@ -23,11 +27,21 @@ pub const MODELS: [(&str, &str); 2] = [
 /// Fails on an unknown model, or if a built-in map does not load.
 pub fn model_map(model: &str) -> anyhow::Result<Map> {
     let json = match model {
+        CALORATTO_LEGACY => include_str!("../../../configs/regmap.caloratto-legacy.json"),
         CALORATTO => include_str!("../../../configs/regmap.caloratto-2.0.json"),
         SIMULATOR => include_str!("../../../configs/regmap.json"),
         other => anyhow::bail!("unknown machine model {other:?}"),
     };
     Ok(Map::from_json(json)?)
+}
+
+/// Where a model's PLC answers out of the factory, as an example to type.
+#[must_use]
+pub fn example_address(model: &str) -> &'static str {
+    match model {
+        CALORATTO => "192.168.5.11:502",
+        _ => "192.168.0.10:502",
+    }
 }
 
 /// A model's name, for people.
@@ -88,7 +102,7 @@ mod tests {
         for (id, title) in MODELS {
             let map = model_map(id).unwrap();
             assert_eq!(model_title(id), title);
-            if id == CALORATTO {
+            if id != SIMULATOR {
                 assert!(
                     map.points().iter().all(|p| !p.writable),
                     "the real machine's map stays read only"
@@ -96,5 +110,17 @@ mod tests {
             }
         }
         assert!(model_map("other").is_err());
+    }
+
+    #[test]
+    fn the_legacy_model_reads_the_two_temperatures_in_whole_degrees() {
+        let map = model_map(CALORATTO_LEGACY).unwrap();
+        let addr = |name: &str| {
+            let p = map.points().iter().find(|p| p.name == name).unwrap();
+            (p.addr, p.scale)
+        };
+        assert_eq!(addr("et"), (8000, 1.0));
+        assert_eq!(addr("bt"), (8001, 1.0));
+        assert_eq!(map.points().len(), 2, "nothing else is known on it");
     }
 }
