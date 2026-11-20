@@ -1,6 +1,6 @@
 [package]
 name = "desktop"
-version = "0.1.1"
+version = "0.1.2"
 description = "Roastro's native desktop app (GPUI): the live roast screen over the in-process engine."
 edition.workspace = true
 rust-version.workspace = true

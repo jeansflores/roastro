@@ -1,0 +1,8 @@
+{
+  "_note": "READ-ONLY MAP for Caloratto machines built before August 2020 (WEG PLC300 at 192.168.0.10). From Artisan's 'Carmomaq Caloratto/Materattor Legacy' preset: two temperatures in holding 8000/8001, whole degrees (divisor 0), unit 1. Confirmed on the machine on 2026-11-20: 8000/8001 answer (e.g. 148 and 179), holding 43 and input registers refuse with illegal data address. Which of the two is BT follows Artisan's order (input 1 = ET, input 2 = BT) and is still to be confirmed at charge, where BT drops far more than ET. No gas, air or drum points: the preset has none. No point is writable on purpose.",
+  "unit_id": 1,
+  "points": [
+    { "name": "et", "kind": "holding", "addr": 8000, "scale": 1, "signed": false, "unit": "°C", "desc": "Exhaust/air temperature (Artisan input 1; to confirm)" },
+    { "name": "bt", "kind": "holding", "addr": 8001, "scale": 1, "signed": false, "unit": "°C", "desc": "Bean temperature (Artisan input 2; to confirm)" }
+  ]
+}

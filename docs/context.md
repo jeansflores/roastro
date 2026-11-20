@@ -23,10 +23,10 @@ Specifications:
 
 ### Communication: Ethernet, Modbus TCP (not USB)
 
-- The PLC is at `192.168.5.11`.
-- The PC needs a static IP on the same network. The manual (p. 23) uses `192.168.5.2 / 255.255.255.0`, gateway `192.168.5.11`.
+- **Jean's machine is a Legacy Caloratto** (built before August 2020), found on the first visit (2026-11-20): a WEG PLC300 (firmware V4.11) at `192.168.0.10`, Modbus TCP port 502, unit 1. Only function 3 (read holding registers) answers; the two temperatures are at holding 8000/8001 (e.g. 148 and 179). Holding 43, holding 0 and input registers answer "illegal data address". 8002 reads 3276 and 8003 reads 0, constant. The PC goes on `192.168.0.2 / 255.255.255.0`, no gateway needed (keep Wi-Fi for the internet).
+- Machines built since August 2020 (the manual and the 2.0 preset): the PLC is at `192.168.5.11`, and the manual (p. 23) puts the PC on `192.168.5.2 / 255.255.255.0`, gateway `192.168.5.11`. A gateway on the cable must not take the default route from the Wi-Fi.
 - In Cropster the connector is "Carmomaq PLC" with host `192.168.5.11`. Channels shown: bean temp (ch0), exhaust (ch1), drum speed (ch2), airflow (ch3) and gas %.
-- According to Cropster's public docs, Caloratto/Masteratto machines built before 2020 used "Generic Modbus over Network (TCP)" with default IP `192.168.0.10`. Jean's machine follows the manual: `192.168.5.11`.
+- According to Cropster's public docs, Caloratto/Masteratto machines built before 2020 used "Generic Modbus over Network (TCP)" with default IP `192.168.0.10`. Jean's machine is one of these.
 - Carmomaq's Artisan setup has buttons to turn the stirrer, burner ("power"), fan and drum on and off, and sliders for air, power and drum. The `.aset` settings file is linked on p. 25 of the manual: <https://drive.google.com/file/d/1VOpkJgTtUojalDRGbpgMkGVFJRgIp4W9/view>.
 
 ### Internal architecture (from the electrical schematic)
@@ -75,9 +75,13 @@ Specifications:
 
 **Charge and drop are mechanical.** The PLC does not move the coffee. Artisan's Caloratto 2.0 preset does tell the PLC about them (holding 50: write 1 at charge, 2 at drop), but whether the PLC exposes them for reading is unknown, so the app cannot count on knowing them on its own. Either the user presses a Charge/Drop button in the app (as in Cropster and Artisan), or the app detects them: charge from the sharp BT drop, drop from the behavior afterwards. Both can be done.
 
-### Register map (from Artisan's Caloratto 2.0 preset, 2026-11-12)
+### Register map, Legacy machines (Jean's)
 
-Modbus TCP, port 502, unit 1. Everything is a holding register. Not yet checked on the machine.
+Holding 8000 and 8001, whole degrees, unit 1, read with function 3. Artisan's preset reads 8000 as its input 1 (ET by convention) and 8001 as input 2 (BT); which is which is still to be confirmed at charge. Gas, air, drum, the timer and the alarms are not in the preset; where they live is unknown.
+
+### Register map, 2.0 machines (from Artisan's Caloratto 2.0 preset, 2026-11-12)
+
+Modbus TCP, port 502, unit 1. Everything is a holding register. Not checked on a machine (Jean's is a Legacy one).
 
 | Holding | What | Confidence |
 |---|---|---|
@@ -103,7 +107,7 @@ What this means for `configs/regmap.json`:
 
 - Artisan repo: <https://github.com/artisan-roaster-scope/artisan>.
   - PR #1233 (2023), sent by Carmomaq's automation lead, brought updated `.aset` setups for post-2020 Carmomaq machines. They live in `src/includes/Machines/Carmomaq/`.
-  - `Caloratto_2.0.aset` matches this machine (host `192.168.5.11`); see "Register map" below. `Caloratto-Materatto_Legacy.aset` is for pre-2020 machines (host `192.168.0.10`, BT/ET only at holding 8000/8001) and does not.
+  - `Caloratto-Materatto_Legacy.aset` is for pre-2020 machines, Jean's among them (host `192.168.0.10`, BT/ET only at holding 8000/8001, divisor 0): the app's `caloratto-legacy` model (`configs/regmap.caloratto-legacy.json`). `Caloratto_2.0.aset` is for newer machines (host `192.168.5.11`); see "Register map" below: the app's `caloratto-2.0` model.
   - The `.aset` files are not copied into this repository (Artisan is GPLv3); read them there.
 - <https://github.com/turicas/carmomaq>: utilities to collect data from and control Carmomaq roasters.
 - License: Artisan is GPLv3. Reading the `.aset` files to learn the map is fine. Copying Artisan code would make this project GPL. The plan is to write our own code.
@@ -174,13 +178,13 @@ Ideas for the app:
 
 First test on the real machine (when the colleague is there):
 
-- Read-only, from a PC on `192.168.5.x`: `cargo run -q -p probe -- --url tcp://192.168.5.11:502 --map configs/regmap.caloratto-2.0.json --csv first-roast.csv`. Writes to a non-local target are blocked, and that map has no writable points.
+- Read-only, from a PC on `192.168.0.x`: `cargo run -q -p probe -- --url tcp://192.168.0.10:502 --map configs/regmap.caloratto-legacy.json --csv first-roast.csv`. Writes to a non-local target are blocked, and that map has no writable points.
 - Compare the values with the machine's own panel, and charge once to tell BT from ET.
 - The CSV also helps calibrate the simulator.
 - Do not let AI agents or other tools run commands on the machine's network: Modbus has no authentication and this is a gas roaster.
 
 ## Appendix A: open questions
 
-- Register map details still open: which of holding 43/44 is BT, whether command registers (50, 52, 55–60) can be read, and where (if anywhere) the PLC exposes gas valve feedback, the timer and the alarms.
+- Register map details still open: on the Legacy machine, which of holding 8000/8001 is BT and where gas, air, drum, timer and alarms live; on 2.0 machines, which of holding 43/44 is BT, whether command registers (50, 52, 55–60) can be read, and where (if anywhere) the PLC exposes gas valve feedback, the timer and the alarms.
 - Confirm the PLC's real interlocks.
-- Exact year of the machine (the schematic is from 2020-07; the manual is rev. 2024).
+- Exact year of the machine: before August 2020 (Legacy PLC300); the schematic (2020-07) and the manual (rev. 2024) may describe the newer generation.

@@ -117,7 +117,7 @@ impl Trouble {
             }
             Trouble::Slow => "The machine stopped answering in time. Check the network.",
             Trouble::Refused => {
-                "The machine answers but refuses the readings: the model may not match this machine."
+                "The machine answers but refuses the readings: the model may not match this machine. Try the other Caloratto model."
             }
             Trouble::Broken => "The connection broke. Roastro reconnects on its own.",
         }
